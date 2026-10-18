@@ -5,6 +5,7 @@ package model
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -279,11 +280,12 @@ type Recovery struct {
 }
 
 type Download struct {
-	Mirror      string `json:"mirror"`       // префикс-зеркало GitHub, напр. https://ghfast.top/
-	Proxy       string `json:"proxy"`        // http(s)://host:port для загрузок
-	SingboxPath string `json:"singbox_path"` // свой бинарник
-	AmneziaPath string `json:"amnezia_path"`
-	BinDir      string `json:"bin_dir"` // куда устанавливать ядра
+	Mirror      string   `json:"mirror,omitempty"`  // старое поле: одно зеркало; при загрузке настроек переносится в Mirrors
+	Mirrors     []string `json:"mirrors,omitempty"` // зеркала GitHub (префиксы вида https://ghfast.top/): перебираются по порядку, затем прямой доступ
+	Proxy       string   `json:"proxy"`             // http(s)://host:port для загрузок
+	SingboxPath string   `json:"singbox_path"`      // свой бинарник
+	AmneziaPath string   `json:"amnezia_path"`
+	BinDir      string   `json:"bin_dir"` // куда устанавливать ядра
 }
 
 // Default возвращает настройки «из коробки».
@@ -428,6 +430,17 @@ func (s *Settings) Normalize() {
 	if s.Firewall.BypassDst == nil {
 		s.Firewall.BypassDst = []string{}
 	}
+	// одно зеркало из старых настроек переезжает в список
+	var ms []string
+	seenM := map[string]bool{}
+	for _, m := range append([]string{s.Download.Mirror}, s.Download.Mirrors...) {
+		m = strings.TrimRight(strings.TrimSpace(m), "/")
+		if m != "" && !seenM[strings.ToLower(m)] {
+			seenM[strings.ToLower(m)] = true
+			ms = append(ms, m)
+		}
+	}
+	s.Download.Mirror, s.Download.Mirrors = "", ms
 	for i := range s.Groups {
 		g := &s.Groups[i]
 		if g.Type == "" {
@@ -542,6 +555,11 @@ func (s *Settings) Validate() []Issue {
 	}
 	for _, g := range s.Groups {
 		register("группа", g.Name)
+	}
+	for _, m := range s.Download.Mirrors {
+		if u, err := url.Parse(strings.TrimSpace(m)); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			add("error", "зеркало GitHub «%s»: нужен адрес вида https://ghfast.top/", m)
+		}
 	}
 	for _, r := range s.RuleSets {
 		if r.Name == "" || r.URL == "" {

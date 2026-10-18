@@ -28,6 +28,7 @@ import (
 	"corepanel/internal/importer"
 	"corepanel/internal/installer"
 	"corepanel/internal/kmods"
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
 	"corepanel/internal/store"
@@ -160,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	api("GET", "iface-check", s.ifaceCheck, true)
 	api("GET", "dns/system", s.dnsSystem, true)
 	api("POST", "dns/test", s.dnsTest, true)
+	api("POST", "mirrors/test", s.mirrorsTest, true)
 	api("GET", "firewall/preview", s.fwPreview, true)
 	api("GET", "logs", s.logs, true)
 	api("GET", "logs/stream", s.logStream, true)
@@ -250,6 +252,26 @@ func (s *Server) dnsTest(w http.ResponseWriter, r *http.Request) {
 		in.Bootstrap = s.St.Get().DNS.Bootstrap
 	}
 	ok(w, dnstest.Test(r.Context(), in.Addr, in.Bootstrap))
+}
+
+// mirrorsTest проверяет прямой доступ к GitHub и каждое переданное зеркало (список ещё может быть не сохранён).
+func (s *Server) mirrorsTest(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Mirrors []string }
+	if !decode(w, r, &in) {
+		return
+	}
+	var list []string
+	for _, m := range in.Mirrors {
+		if mirror.Valid(m) {
+			list = append(list, mirror.Normalize(m))
+		}
+	}
+	if len(list) > 12 {
+		list = list[:12]
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	ok(w, map[string]any{"results": mirror.Check(ctx, s.St.Get().Download, list), "popular": mirror.Popular})
 }
 
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {

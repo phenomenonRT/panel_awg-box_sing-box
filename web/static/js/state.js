@@ -12,7 +12,12 @@ export function normalize(s) {
   const arr = (o, k) => { if (!Array.isArray(o[k])) o[k] = []; };
   for (const k of ['general', 'inbounds', 'tun', 'dns', 'firewall', 'download', 'update', 'recovery']) if (!s[k] || typeof s[k] !== 'object') s[k] = {};
   for (const k of ['nodes', 'groups', 'rule_sets', 'rules', 'ifaces']) arr(s, k);
-  arr(s.dns, 'rules'); arr(s.tun, 'exclude_cidr');
+  arr(s.dns, 'rules'); arr(s.tun, 'exclude_cidr'); arr(s.download, 'mirrors');
+  if (s.download.mirror) { // старое поле «одно зеркало» переезжает в список
+    const m = String(s.download.mirror).trim();
+    if (m && !s.download.mirrors.some((x) => x.toLowerCase() === m.toLowerCase())) s.download.mirrors.unshift(m);
+  }
+  delete s.download.mirror;
   for (const k of ['lan_ifaces', 'include', 'exclude', 'bypass_dst']) arr(s.firewall, k);
   if (s.core !== 'amnezia') s.core = 'amnezia';
   if (!s.final) s.final = 'direct';

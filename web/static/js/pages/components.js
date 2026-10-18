@@ -1,4 +1,4 @@
-import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, chk, num, toast, toastErr, confirmBox } from '../ui.js';
+import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, chk, num, lines, toast, toastErr, confirmBox } from '../ui.js';
 import { get, post } from '../api.js';
 import * as st from '../state.js';
 
@@ -160,6 +160,33 @@ export default async function (root) {
   get('api/core/job').then((j) => { if (j && j.running) poll(); else drawJob(j && j.finished && j.error ? j : null); }).catch(() => {});
 
   const d = s.download;
+  // Список зеркал: по строке на адрес, проверка кнопкой и добавление популярных.
+  function mirrorEditor() {
+    const area = lines(d, 'mirrors', { rows: 4, ph: 'https://ghfast.top/\nhttps://gh-proxy.com/', dedupe: true });
+    const out = h('div', { class: 'mirror-res small' });
+    let popular = [];
+    const test = h('button', { type: 'button', class: 'btn sm', title: 'С роутера запросить небольшой файл с GitHub напрямую и через каждое зеркало', onclick: async () => {
+      test.disabled = true; test.textContent = 'Проверяю…';
+      clear(out).append(h('span', { class: 'mute' }, 'Запрашиваю файл через каждое зеркало…'));
+      try {
+        const r = await post('api/mirrors/test', { mirrors: d.mirrors });
+        popular = r.popular || popular;
+        clear(out).append((r.results || []).map((x) => h('div', { class: 'mirror-row' },
+          h('span', { class: 'dot ' + (x.ok ? 'ok' : 'err') }),
+          h('span', { class: 'mirror-name mono' }, x.mirror || 'GitHub напрямую'),
+          h('span', { class: x.ok ? 'mute' : 'bad' }, x.ok ? x.ms + ' мс' : x.error))));
+      } catch (e) { clear(out).append(note('err', e.message || String(e))); }
+      test.disabled = false; test.textContent = 'Проверить зеркала';
+    } }, 'Проверить зеркала');
+    const addPop = h('button', { type: 'button', class: 'btn sm', title: 'Публичные зеркала сторонних сервисов: могут пропасть, после добавления проверьте их', onclick: () => {
+      const list = popular.length ? popular : ['https://ghfast.top/', 'https://gh-proxy.com/', 'https://ghproxy.net/', 'https://github.moeyy.xyz/', 'https://hub.gitmirror.com/'];
+      const have = new Set(d.mirrors.map((x) => x.toLowerCase().replace(/\/+$/, '')));
+      for (const m of list) if (!have.has(m.toLowerCase().replace(/\/+$/, ''))) d.mirrors.push(m);
+      st.touch(); area.value = d.mirrors.join('\n');
+      toast('Добавлены популярные зеркала: проверьте их кнопкой справа', 'ok');
+    } }, 'Добавить популярные');
+    return h('div', { class: 'mirrors' }, area, h('div', { class: 'row', style: 'margin-top:6px' }, addPop, test), out);
+  }
   apd(root, 
     h('div', { class: 'card' }, h('h2', 'Автозапуск'),
       chk(s, 'autostart', 'Запускать ядро вместе с панелью', 'При старте роутера панель сама поднимет выбранное ядро с сохранёнными настройками.')),
@@ -175,7 +202,7 @@ export default async function (root) {
     h('div', { class: 'card' }, h('h2', 'Загрузка ядер и наборов правил'),
       note('', 'Релизы берутся с GitHub. Если GitHub недоступен, укажите зеркало или прокси.'),
       fgrid(
-        field('Зеркало GitHub', txt(d, 'mirror', { ph: 'https://ghfast.top/' }), 'Префикс, который добавляется перед ссылкой на GitHub. Используется для ядер и наборов правил.'),
+        field('Зеркала GitHub', mirrorEditor(), 'По одному адресу в строке. Если GitHub недоступен, панель пробует зеркала по порядку, а затем сам GitHub. Используются для ядра, обновления панели и наборов правил (в конфиг ядра попадает первое зеркало). Зеркало видит всё, что вы через него скачиваете, и может подменить файл: берите только те, которым доверяете.'),
         field('HTTP-прокси для загрузок', txt(d, 'proxy', { ph: 'http://127.0.0.1:7890' }), 'Например, mixed-порт уже работающего ядра или другого прокси. Формат: http(s)://host:port.'),
         field('Каталог установки ядер', txt(d, 'bin_dir', { ph: (S.system && S.system.platform && S.system.platform.bin_dir) || '/opt/bin' }), 'Куда класть бинарники. Пусто — каталог по умолчанию для платформы. На роутерах с малой флеш-памятью выбирайте внешний накопитель.'),
         field('Свой бинарник amnezia-box', txt(d, 'amnezia_path', { ph: '/opt/bin/amnezia-box' }))),
