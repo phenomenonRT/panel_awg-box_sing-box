@@ -261,10 +261,8 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	}
 
 	cmd := exec.Command(bin, "run", "-c", cfgPath, "-D", dir)
-	// Переменная окружения нужна только для sing-box 1.14+; amnezia-box (1.12) её не знает
-	if set.Core != model.CoreAmnezia {
-		cmd.Env = append(os.Environ(), "ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true")
-	}
+	// sing-box 1.14+ (включая amnezia-box на базе 1.15): разрешаем неявный HTTP-клиент для совместимости
+	cmd.Env = append(os.Environ(), "ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true")
 	if mb := set.General.MemLimitMB; mb > 0 {
 		// «сколько памяти можно ядру»: мягкий предел Go-рантайма (GOMEMLIMIT) — сборщик мусора держит
 		// потребление ниже него, чтобы ядро не выело память роутера.

@@ -40,8 +40,14 @@ func Singbox(s *model.Settings) (*Result, error) {
 	if len(endpoints) > 0 {
 		root.Set("endpoints", endpoints)
 	}
-	// amnezia-box (sing-box 1.12) не поддерживает http_clients/http_client —
-	// для него используем download_detour в каждом rule_set ниже
+	// sing-box 1.14+ (включая amnezia-box): списки скачиваются через явный HTTP-клиент
+	if len(p.sets) > 0 {
+		cl := NewO().Set("tag", "rules-dl")
+		if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
+			cl.Set("detour", v)
+		}
+		root.Set("http_clients", []any{cl})
+	}
 	root.Set("route", sbRoute(s, p))
 	if s.Tun.Enabled && s.Tun.AutoRoute && s.Tun.StrictRoute && s.Tun.AutoRedirect {
 		// в sing-tun при auto_redirect набор ip-правил строится в «режиме меток» и сразу возвращается,
@@ -646,7 +652,9 @@ func sbRoute(s *model.Settings, p *plan) *O {
 				o.Set("format", "binary")
 			}
 			o.Set("url", sp.URL)
-			if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
+			if s.Core == model.CoreAmnezia {
+				o.Set("http_client", "rules-dl")
+			} else if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
 				o.Set("download_detour", v)
 			}
 			iv := sp.Interval
