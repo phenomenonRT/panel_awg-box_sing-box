@@ -272,20 +272,20 @@ func TestAmneziaRuleSetHTTPClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := string(res.Config)
-	if !strings.Contains(c, `"http_clients"`) || !strings.Contains(c, `"http_client": "rules-dl"`) || strings.Contains(c, "download_detour") {
-		t.Errorf("ожидался явный http_client:\n%s", c)
+	// amnezia-box (sing-box 1.12) не поддерживает http_clients/http_client — их быть не должно
+	if strings.Contains(c, `"http_clients"`) || strings.Contains(c, `"http_client"`) {
+		t.Errorf("amnezia-box не поддерживает http_clients/http_client:\n%s", c)
 	}
-	// прямая загрузка: detour не задаётся (ядро 1.14 отвергает detour на пустой direct)
-	i := strings.Index(c, `"http_clients"`)
-	if seg := c[i : i+120]; strings.Contains(seg, `"detour"`) {
-		t.Errorf("для direct detour быть не должно: %s", seg)
+	// прямая загрузка (UpdateVia="direct"): download_detour не задаётся
+	if strings.Contains(c, `"download_detour"`) {
+		t.Errorf("для direct download_detour быть не должно:\n%s", c)
 	}
+	// через proxy: download_detour обязателен
 	s.General.UpdateVia = "proxy"
 	res, _ = Singbox(s)
 	c = string(res.Config)
-	i = strings.Index(c, `"http_clients"`)
-	if !strings.Contains(c[i:i+120], `"detour": "proxy"`) {
-		t.Errorf("через proxy detour обязателен: %s", c[i:i+120])
+	if !strings.Contains(c, `"download_detour": "proxy"`) {
+		t.Errorf("через proxy download_detour обязателен:\n%s", c)
 	}
 }
 
