@@ -40,16 +40,8 @@ func Singbox(s *model.Settings) (*Result, error) {
 	if len(endpoints) > 0 {
 		root.Set("endpoints", endpoints)
 	}
-	if len(p.sets) > 0 && s.Core == model.CoreAmnezia {
-		// sing-box 1.14+: списки скачиваются через явный HTTP-клиент (неявный клиент по умолчанию устарел)
-		// «direct» как detour ядро отвергает («detour to an empty direct outbound makes no sense»):
-		// для прямой загрузки detour просто не задаётся.
-		cl := NewO().Set("tag", "rules-dl")
-		if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
-			cl.Set("detour", v)
-		}
-		root.Set("http_clients", []any{cl})
-	}
+	// amnezia-box (sing-box 1.12) не поддерживает http_clients/http_client —
+	// для него используем download_detour в каждом rule_set ниже
 	root.Set("route", sbRoute(s, p))
 	if s.Tun.Enabled && s.Tun.AutoRoute && s.Tun.StrictRoute && s.Tun.AutoRedirect {
 		// в sing-tun при auto_redirect набор ip-правил строится в «режиме меток» и сразу возвращается,
@@ -287,7 +279,7 @@ func sbInbounds(s *model.Settings) []any {
 			Set("auto_route", s.Tun.AutoRoute).
 			Opt("strict_route", s.Tun.StrictRoute).
 			Opt("auto_redirect", s.Tun.AutoRedirect && s.Tun.AutoRoute)
-		if s.Core != model.CoreAmnezia { // в sing-box 1.15 (amnezia-box) параметр stack устарел
+		if s.Tun.Stack != "" {
 			t.Set("stack", s.Tun.Stack)
 		}
 		if len(s.Tun.ExcludeCIDR) > 0 {
@@ -304,7 +296,7 @@ func sbInbounds(s *model.Settings) []any {
 			Set("address", []string{strings.TrimSpace(f.Address)}).
 			Opt("mtu", f.MTU).
 			Set("auto_route", false)
-		if s.Core != model.CoreAmnezia {
+		if s.Tun.Stack != "" {
 			t.Set("stack", s.Tun.Stack)
 		}
 		in = append(in, t)
@@ -654,9 +646,7 @@ func sbRoute(s *model.Settings, p *plan) *O {
 				o.Set("format", "binary")
 			}
 			o.Set("url", sp.URL)
-			if s.Core == model.CoreAmnezia {
-				o.Set("http_client", "rules-dl")
-			} else if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
+			if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
 				o.Set("download_detour", v)
 			}
 			iv := sp.Interval

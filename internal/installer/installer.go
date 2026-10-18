@@ -829,13 +829,15 @@ func (in *Installer) Remove(ctx context.Context, core string, d model.Download) 
 			}
 		}
 	}
-	custom := d.SingboxPath
-	if core == model.CoreAmnezia {
-		custom = d.AmneziaPath
-	}
 	if len(done) == 0 {
-		if custom != "" && isExec(custom) {
-			return "", fmt.Errorf("используется свой бинарник %s — панель его не удаляет; уберите путь в настройках ниже", custom)
+		if core == model.CoreAmnezia {
+			if custom := d.AmneziaPath; custom != "" && isExec(custom) {
+				return "", fmt.Errorf("используется свой бинарник %s — панель его не удаляет; уберите путь в настройках ниже", custom)
+			}
+		} else {
+			if custom := d.SingboxPath; custom != "" && isExec(custom) {
+				return "", fmt.Errorf("используется свой бинарник %s — панель его не удаляет; уберите путь в настройках ниже", custom)
+			}
 		}
 		return "", errors.New("нечего удалять: ядро не установлено")
 	}

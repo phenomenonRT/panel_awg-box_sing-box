@@ -550,8 +550,12 @@ func ParseWireGuardConf(text string) (model.Node, error) {
 				if err != nil {
 					return n, fmt.Errorf("неверный Endpoint «%s»", v)
 				}
+				port, err := strconv.Atoi(ps)
+				if err != nil || port <= 0 || port > 65535 {
+					return n, fmt.Errorf("неверный порт в Endpoint «%s»", v)
+				}
 				n.Server = strings.Trim(h, "[]")
-				n.Port, _ = strconv.Atoi(ps)
+				n.Port = port
 			}
 		}
 	}
