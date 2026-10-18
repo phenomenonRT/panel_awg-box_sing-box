@@ -37,6 +37,7 @@ type Settings struct {
 	Firewall Firewall  `json:"firewall"`
 
 	Download Download `json:"download"`
+	Recovery Recovery `json:"recovery"` // автовосстановление ядра при затяжном сбое рукопожатий
 
 	// Произвольные добавки к итоговому конфигу (глубокое слияние).
 	// Позволяют использовать любую возможность ядра, для которой нет полей в UI.
@@ -225,6 +226,15 @@ const (
 	MemLimitMaxMB = 4096
 )
 
+// Допустимые значения автовосстановления: порог серии неудачных рукопожатий и число перезапусков
+// подряд (защита от бесконечного цикла перезапусков).
+const (
+	RecoveryFailsMin    = 2
+	RecoveryFailsMax    = 100
+	RecoveryRestartsMin = 1
+	RecoveryRestartsMax = 10
+)
+
 // RuleSet — удалённый набор правил.
 type RuleSet struct {
 	Name     string `json:"name"`
@@ -259,6 +269,15 @@ type Update struct {
 	Auto bool `json:"auto"` // автоматически ставить новые версии (по умолчанию выключено)
 }
 
+// Recovery — автовосстановление ядра при затяжном сбое рукопожатий AmneziaWG: если сервер
+// перестал отвечать, ядро продолжает работать с «мёртвым» туннелем, и панель перезапускает его.
+// События рукопожатия ядро пишет на уровне логов debug.
+type Recovery struct {
+	Enabled       bool `json:"enabled"`        // следить за рукопожатиями и перезапускать ядро
+	FailThreshold int  `json:"fail_threshold"` // сколько подряд неудачных рукопожатий считать сбоем
+	MaxRestarts   int  `json:"max_restarts"`   // сколько перезапусков подряд делать, прежде чем сдаться
+}
+
 type Download struct {
 	Mirror      string `json:"mirror"`       // префикс-зеркало GitHub, напр. https://ghfast.top/
 	Proxy       string `json:"proxy"`        // http(s)://host:port для загрузок
@@ -282,7 +301,8 @@ func Default() *Settings {
 		DNS: DNS{Enabled: true, Listen: "127.0.0.1:1053", Mode: "normal",
 			Remote: "https://1.1.1.1/dns-query", Local: "77.88.8.8", Bootstrap: "77.88.8.8",
 			FakeIPRange: "198.18.0.0/15", Final: "remote"},
-		Final: "direct",
+		Final:    "direct",
+		Recovery: Recovery{FailThreshold: 5, MaxRestarts: 3},
 		Firewall: Firewall{Mode: "off", Backend: "auto", FwMark: 1, RouteTable: 100,
 			LANIfaces: []string{}, Include: []string{}, Exclude: []string{}, BypassDst: []string{}},
 		Nodes: []Node{}, Groups: []Group{}, RuleSets: []RuleSet{}, Rules: []Rule{},
@@ -353,6 +373,24 @@ func (s *Settings) Normalize() {
 	}
 	if s.Final == "" {
 		s.Final = "direct"
+	}
+	if s.Recovery.FailThreshold == 0 {
+		s.Recovery.FailThreshold = d.Recovery.FailThreshold
+	}
+	switch {
+	case s.Recovery.FailThreshold < RecoveryFailsMin:
+		s.Recovery.FailThreshold = RecoveryFailsMin
+	case s.Recovery.FailThreshold > RecoveryFailsMax:
+		s.Recovery.FailThreshold = RecoveryFailsMax
+	}
+	if s.Recovery.MaxRestarts == 0 {
+		s.Recovery.MaxRestarts = d.Recovery.MaxRestarts
+	}
+	switch {
+	case s.Recovery.MaxRestarts < RecoveryRestartsMin:
+		s.Recovery.MaxRestarts = RecoveryRestartsMin
+	case s.Recovery.MaxRestarts > RecoveryRestartsMax:
+		s.Recovery.MaxRestarts = RecoveryRestartsMax
 	}
 	if s.Firewall.Mode == "" {
 		s.Firewall.Mode = "off"
