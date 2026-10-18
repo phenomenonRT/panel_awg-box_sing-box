@@ -40,8 +40,10 @@ func Singbox(s *model.Settings) (*Result, error) {
 	if len(endpoints) > 0 {
 		root.Set("endpoints", endpoints)
 	}
-	// sing-box 1.14+ (включая amnezia-box): списки скачиваются через явный HTTP-клиент
-	if len(p.sets) > 0 {
+	if len(p.sets) > 0 && s.Core == model.CoreAmnezia {
+		// sing-box 1.14+: списки скачиваются через явный HTTP-клиент (неявный клиент по умолчанию устарел)
+		// «direct» как detour ядро отвергает («detour to an empty direct outbound makes no sense»):
+		// для прямой загрузки detour просто не задаётся.
 		cl := NewO().Set("tag", "rules-dl")
 		if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
 			cl.Set("detour", v)
@@ -285,7 +287,9 @@ func sbInbounds(s *model.Settings) []any {
 			Set("auto_route", s.Tun.AutoRoute).
 			Opt("strict_route", s.Tun.StrictRoute).
 			Opt("auto_redirect", s.Tun.AutoRedirect && s.Tun.AutoRoute)
-		if s.Tun.Stack != "" {
+		// amnezia-box (sing-box 1.15): параметр stack устарел, и его сборка идёт без gVisor —
+		// «mixed»/«gvisor» уронили бы ядро. Не выводим stack: ядро использует стек по умолчанию.
+		if s.Core != model.CoreAmnezia {
 			t.Set("stack", s.Tun.Stack)
 		}
 		if len(s.Tun.ExcludeCIDR) > 0 {
@@ -302,7 +306,7 @@ func sbInbounds(s *model.Settings) []any {
 			Set("address", []string{strings.TrimSpace(f.Address)}).
 			Opt("mtu", f.MTU).
 			Set("auto_route", false)
-		if s.Tun.Stack != "" {
+		if s.Core != model.CoreAmnezia { // amnezia-box: stack не выводим (см. выше)
 			t.Set("stack", s.Tun.Stack)
 		}
 		in = append(in, t)

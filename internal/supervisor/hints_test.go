@@ -1,6 +1,16 @@
 package supervisor
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestHintGvisor(t *testing.T) {
+	h := hintFor("FATAL start service: start inbound: start inbound/tun[tun-in]: gVisor is not included in this build, rebuild with -tags with_gvisor")
+	if !strings.Contains(h, "system") {
+		t.Errorf("ожидалась подсказка про стек system: %q", h)
+	}
+}
 
 func TestNetworkNotReady(t *testing.T) {
 	if !networkNotReady("FATAL start endpoint/awg[x]: create ipv4 connection: listen udp :0: no route to internet") {

@@ -289,6 +289,31 @@ func TestAmneziaRuleSetHTTPClient(t *testing.T) {
 	}
 }
 
+// amnezia-box (sing-box 1.15) собирается без gVisor: стек «mixed»/«gvisor» роняет ядро
+// («gVisor is not included in this build»), а сам параметр stack устарел — панель его не выводит.
+// Легаси-ядру sing-box stack по-прежнему выводится.
+func TestTunStackAmneziaVsSingbox(t *testing.T) {
+	s := sample()
+	if s.Core != model.CoreAmnezia {
+		t.Fatalf("sample() должен быть amnezia, получено %q", s.Core)
+	}
+	res, err := Singbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(res.Config), `"stack"`) {
+		t.Errorf("для amnezia-box stack выводить нельзя (сборка без gVisor):\n%s", res.Config)
+	}
+	s.Core = model.CoreSingbox
+	res, err = Singbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(res.Config), `"stack"`) {
+		t.Errorf("для sing-box stack должен остаться:\n%s", res.Config)
+	}
+}
+
 func TestLogNone(t *testing.T) {
 	s := model.Default()
 	s.General.LogLevel = "none"

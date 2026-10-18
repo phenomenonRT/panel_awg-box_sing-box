@@ -481,6 +481,22 @@ func (s *Supervisor) onExit(cmd *exec.Cmd, err error) {
 	if !desired || s.getSet == nil {
 		return
 	}
+	// падение из-за отсутствия интернета (типично сразу после загрузки роутера) — не сбой:
+	// ждём сеть, как preflight, вместо пяти быстрых автоперезапусков
+	if networkNotReady(strings.Join(s.Logs.Tail(6), "\n")) {
+		s.mu.Lock()
+		s.desired, s.lastErr, s.waitNet, s.waitWhy = false, "", true, "нет маршрута в интернет"
+		start := !s.netLoop
+		if start {
+			s.netLoop = true
+		}
+		s.Logs.Add("[panel] нет маршрута в интернет — это не сбой: запуск будет повторяться каждые 10 с, пока не появится сеть")
+		s.mu.Unlock()
+		if start {
+			go s.waitNetwork()
+		}
+		return
+	}
 	// автоперезапуск с нарастающей паузой; быстрые падения не гоняем бесконечно
 	if uptime > 30*time.Second {
 		restarts = 0
