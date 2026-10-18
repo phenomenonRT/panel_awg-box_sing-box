@@ -18,6 +18,7 @@ import (
 	"corepanel/internal/firewall"
 	"corepanel/internal/gen"
 	"corepanel/internal/installer"
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
 	"corepanel/internal/rulesets"
@@ -118,11 +119,19 @@ type Supervisor struct {
 	getSet    func() *model.Settings
 	bin       string // путь к запущенному ядру (для передачи новой панели)
 	logFile   string // файл вывода ядра
+
+	// автовосстановление при затяжном сбое рукопожатий (см. recovery.go)
+	recovering   bool           // перезапуск уже идёт: второй не начинаем
+	recoverTries int            // сколько автоперезапусков подряд уже сделано
+	recoverNote  string         // предупреждение автовосстановления (показывается в статусе)
+	awgFails     map[string]int // неудачные рукопожатия подряд по узлам endpoint/awg[...]
 }
 
 // New создаёт супервизор. getSettings вызывается при автоперезапуске.
 func New(info platform.Info, inst *installer.Installer, getSettings func() *model.Settings) *Supervisor {
-	return &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), getSet: getSettings}
+	s := &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), getSet: getSettings}
+	go s.watchHandshakes()
+	return s
 }
 
 // RuntimeDir — рабочий каталог ядра.
@@ -252,7 +261,7 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	}
 
 	cmd := exec.Command(bin, "run", "-c", cfgPath, "-D", dir)
-	// страховка для сборок 1.14+: не падать из-за устаревшего неявного HTTP-клиента
+	// sing-box 1.14+ (включая amnezia-box на базе 1.15): разрешаем неявный HTTP-клиент для совместимости
 	cmd.Env = append(os.Environ(), "ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true")
 	if mb := set.General.MemLimitMB; mb > 0 {
 		// «сколько памяти можно ядру»: мягкий предел Go-рантайма (GOMEMLIMIT) — сборщик мусора держит
@@ -278,10 +287,13 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	s.cmd, s.done, s.core = cmd, make(chan struct{}), set.Core
 	s.bin, s.logFile = bin, logFile
 	s.startedAt, s.lastErr, s.fwErr, s.desired = time.Now(), "", "", true
+	s.awgFails = nil // у нового процесса ядра счётчики рукопожатий с нуля
 	s.warnings = res.Warnings
 	s.version, _ = installer.Version(context.Background(), set.Core, bin)
 	if userInitiated {
 		s.restarts = 0
+		// ручной запуск: серия автовосстановления начинается заново
+		s.recoverTries, s.recoverNote = 0, ""
 	}
 	s.waitNet = false
 	s.Logs.Add(fmt.Sprintf("[panel] запущен %s (pid %d), конфиг %s", filepath.Base(bin), cmd.Process.Pid, cfgPath))
@@ -397,11 +409,11 @@ func (s *Supervisor) watchRoutesLocked(sc *firewall.Scripts, done <-chan struct{
 
 // rulesetFetcher скачивает текстовые наборы: напрямую (с зеркалом, если оно включено), затем через прокси ядра.
 func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets.Fetcher {
-	mirror := ""
+	var mirrors []string
 	if v := set.General.UpdateVia; v == "" || v == "direct" {
-		mirror = set.Download.Mirror
+		mirrors = mirror.List(set.Download)
 	}
-	return rulesets.NewFetcher(mirror, proxyPort)
+	return rulesets.NewFetcher(mirrors, proxyPort)
 }
 
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.
@@ -467,6 +479,22 @@ func (s *Supervisor) onExit(cmd *exec.Cmd, err error) {
 	s.mu.Unlock()
 
 	if !desired || s.getSet == nil {
+		return
+	}
+	// падение из-за отсутствия интернета (типично сразу после загрузки роутера) — не сбой:
+	// ждём сеть, как preflight, вместо пяти быстрых автоперезапусков
+	if networkNotReady(strings.Join(s.Logs.Tail(6), "\n")) {
+		s.mu.Lock()
+		s.desired, s.lastErr, s.waitNet, s.waitWhy = false, "", true, "нет маршрута в интернет"
+		start := !s.netLoop
+		if start {
+			s.netLoop = true
+		}
+		s.Logs.Add("[panel] нет маршрута в интернет — это не сбой: запуск будет повторяться каждые 10 с, пока не появится сеть")
+		s.mu.Unlock()
+		if start {
+			go s.waitNetwork()
+		}
 		return
 	}
 	// автоперезапуск с нарастающей паузой; быстрые падения не гоняем бесконечно
@@ -583,6 +611,9 @@ func (s *Supervisor) Status() Status {
 	defer s.mu.Unlock()
 	st := Status{State: "stopped", Core: s.core, Error: s.lastErr, FirewallError: s.fwErr,
 		Restarts: s.restarts, Version: s.version, Warnings: s.warnings}
+	if s.recoverNote != "" {
+		st.Warnings = append(append([]string{}, s.warnings...), s.recoverNote)
+	}
 	if s.running() {
 		st.State = "running"
 		st.PID = s.cmd.Process.Pid

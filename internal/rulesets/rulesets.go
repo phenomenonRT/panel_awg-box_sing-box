@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 )
 
@@ -132,8 +133,8 @@ func Convert(text string) ([]byte, int) {
 // Fetcher скачивает адрес целиком.
 type Fetcher func(ctx context.Context, rawURL string) ([]byte, error)
 
-// NewFetcher — скачивание напрямую (с зеркалом GitHub, если задано), затем через локальный прокси ядра.
-func NewFetcher(mirror string, proxyPort int) Fetcher {
+// NewFetcher — скачивание с GitHub: зеркала по порядку, затем напрямую, затем через локальный прокси ядра.
+func NewFetcher(mirrors []string, proxyPort int) Fetcher {
 	get := func(ctx context.Context, u string, proxy *url.URL) ([]byte, error) {
 		tr := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 20 * time.Second}
 		if proxy != nil {
@@ -155,14 +156,14 @@ func NewFetcher(mirror string, proxyPort int) Fetcher {
 		return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	}
 	return func(ctx context.Context, raw string) ([]byte, error) {
-		u := raw
-		if m := strings.TrimSpace(mirror); m != "" {
-			if pu, err := url.Parse(raw); err == nil && (pu.Host == "raw.githubusercontent.com" || pu.Host == "github.com") {
-				u = strings.TrimRight(m, "/") + "/" + raw
+		var b []byte
+		var err error
+		for _, u := range mirror.Variants(mirrors, raw) {
+			if b, err = get(ctx, u, nil); err == nil {
+				return b, nil
 			}
 		}
-		b, err := get(ctx, u, nil)
-		if err == nil || proxyPort <= 0 {
+		if proxyPort <= 0 {
 			return b, err
 		}
 		if p, perr := url.Parse(fmt.Sprintf("http://%s", net.JoinHostPort("127.0.0.1", fmt.Sprint(proxyPort)))); perr == nil {

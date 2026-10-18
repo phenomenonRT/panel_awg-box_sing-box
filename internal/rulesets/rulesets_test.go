@@ -3,6 +3,8 @@ package rulesets
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,5 +85,27 @@ func TestIsText(t *testing.T) {
 	}
 	if !IsText(model.RuleSet{URL: "https://a/b", Format: "text"}) || IsText(model.RuleSet{URL: "https://a/b.lst", Format: "srs"}) {
 		t.Fatal("явный формат главнее")
+	}
+}
+
+func TestFetcherTriesMirrorsInOrder(t *testing.T) {
+	var hits []string
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, "bad")
+		w.WriteHeader(502)
+	}))
+	defer bad.Close()
+	good := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, "good")
+		w.Write([]byte("example.com\n"))
+	}))
+	defer good.Close()
+	fetch := NewFetcher([]string{bad.URL, good.URL}, 0)
+	b, err := fetch(context.Background(), "https://raw.githubusercontent.com/o/r/main/list.lst")
+	if err != nil || string(b) != "example.com\n" {
+		t.Fatalf("b=%q err=%v", b, err)
+	}
+	if len(hits) != 2 || hits[0] != "bad" || hits[1] != "good" {
+		t.Fatalf("порядок обращений: %v", hits)
 	}
 }

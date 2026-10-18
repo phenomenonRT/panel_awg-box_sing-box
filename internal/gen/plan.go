@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 )
 
@@ -82,8 +83,9 @@ func (p *plan) geoURL(s *model.Settings, kind, name string) string {
 	} else {
 		u = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-" + name + ".srs"
 	}
-	if m := strings.TrimSpace(s.Download.Mirror); m != "" && (s.General.UpdateVia == "" || s.General.UpdateVia == "direct") {
-		u = strings.TrimRight(m, "/") + "/" + u
+	// ядро скачивает набор по одной ссылке, поэтому в конфиг попадает только первое зеркало
+	if ms := mirror.List(s.Download); len(ms) > 0 && (s.General.UpdateVia == "" || s.General.UpdateVia == "direct") {
+		u = mirror.Apply(ms[0], u)
 	}
 	return u
 }

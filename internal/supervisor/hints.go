@@ -11,6 +11,10 @@ func hintFor(log string) string {
 			"Установите kmod-nft-queue (кнопка «Установить» на странице «Входящие, TUN, сеть») либо отключите auto_redirect в разделе TUN — прозрачный прокси при этом можно оставить в режиме redirect или tproxy."
 	case strings.Contains(l, "/dev/net/tun"):
 		return "\n\nПодсказка: нет драйвера tun. Установите kmod-tun или отключите TUN."
+	case strings.Contains(l, "gvisor is not included"):
+		return "\n\nПодсказка: эта сборка ядра собрана без gVisor, а в TUN задан стек «gvisor» или «mixed». " +
+			"Выберите стек «system» в разделе TUN либо обновите панель: для amnezia-box стек не нужен — " +
+			"в sing-box 1.15 параметр stack устарел, и панель его больше не выводит."
 	}
 	return ""
 }

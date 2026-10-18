@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
 )
@@ -127,13 +128,6 @@ func (u *Updater) client() (*http.Client, error) {
 		tr.Proxy = http.ProxyURL(pu)
 	}
 	return &http.Client{Transport: tr, Timeout: 5 * time.Minute}, nil
-}
-
-func (u *Updater) withMirror(s string) string {
-	if m := strings.TrimSpace(u.Settings().Download.Mirror); m != "" {
-		return strings.TrimRight(m, "/") + "/" + s
-	}
-	return s
 }
 
 // State возвращает последнее известное состояние без обращения к сети.
@@ -270,17 +264,24 @@ func (u *Updater) run(assetURL, sumsURL, ver string) error {
 	if r, e := filepath.EvalSymlinks(exe); e == nil {
 		exe = r
 	}
+	mirrors := mirror.List(u.Settings().Download)
+	// get перебирает зеркала по порядку, затем прямой адрес GitHub
 	get := func(link string) (*http.Response, error) {
-		req, _ := http.NewRequestWithContext(ctx, "GET", u.withMirror(link), nil)
-		resp, err := cl.Do(req)
-		if err != nil {
-			return nil, err
+		var errs []string
+		for _, v := range mirror.Variants(mirrors, link) {
+			req, _ := http.NewRequestWithContext(ctx, "GET", v, nil)
+			resp, err := cl.Do(req)
+			if err == nil && resp.StatusCode != 200 {
+				resp.Body.Close()
+				err = fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+			if err != nil {
+				errs = append(errs, mirror.Host(v)+": "+err.Error())
+				continue
+			}
+			return resp, nil
 		}
-		if resp.StatusCode != 200 {
-			resp.Body.Close()
-			return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-		}
-		return resp, nil
+		return nil, errors.New(strings.Join(errs, "; "))
 	}
 	u.add("версия " + ver + ": проверяю контрольную сумму")
 	resp, err := get(sumsURL)

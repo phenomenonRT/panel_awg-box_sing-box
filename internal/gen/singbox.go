@@ -287,7 +287,9 @@ func sbInbounds(s *model.Settings) []any {
 			Set("auto_route", s.Tun.AutoRoute).
 			Opt("strict_route", s.Tun.StrictRoute).
 			Opt("auto_redirect", s.Tun.AutoRedirect && s.Tun.AutoRoute)
-		if s.Core != model.CoreAmnezia { // в sing-box 1.15 (amnezia-box) параметр stack устарел
+		// amnezia-box (sing-box 1.15): параметр stack устарел, и его сборка идёт без gVisor —
+		// «mixed»/«gvisor» уронили бы ядро. Не выводим stack: ядро использует стек по умолчанию.
+		if s.Core != model.CoreAmnezia {
 			t.Set("stack", s.Tun.Stack)
 		}
 		if len(s.Tun.ExcludeCIDR) > 0 {
@@ -304,7 +306,7 @@ func sbInbounds(s *model.Settings) []any {
 			Set("address", []string{strings.TrimSpace(f.Address)}).
 			Opt("mtu", f.MTU).
 			Set("auto_route", false)
-		if s.Core != model.CoreAmnezia {
+		if s.Core != model.CoreAmnezia { // amnezia-box: stack не выводим (см. выше)
 			t.Set("stack", s.Tun.Stack)
 		}
 		in = append(in, t)

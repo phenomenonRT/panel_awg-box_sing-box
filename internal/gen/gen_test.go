@@ -289,6 +289,31 @@ func TestAmneziaRuleSetHTTPClient(t *testing.T) {
 	}
 }
 
+// amnezia-box (sing-box 1.15) собирается без gVisor: стек «mixed»/«gvisor» роняет ядро
+// («gVisor is not included in this build»), а сам параметр stack устарел — панель его не выводит.
+// Легаси-ядру sing-box stack по-прежнему выводится.
+func TestTunStackAmneziaVsSingbox(t *testing.T) {
+	s := sample()
+	if s.Core != model.CoreAmnezia {
+		t.Fatalf("sample() должен быть amnezia, получено %q", s.Core)
+	}
+	res, err := Singbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(res.Config), `"stack"`) {
+		t.Errorf("для amnezia-box stack выводить нельзя (сборка без gVisor):\n%s", res.Config)
+	}
+	s.Core = model.CoreSingbox
+	res, err = Singbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(res.Config), `"stack"`) {
+		t.Errorf("для sing-box stack должен остаться:\n%s", res.Config)
+	}
+}
+
 func TestLogNone(t *testing.T) {
 	s := model.Default()
 	s.General.LogLevel = "none"
@@ -600,4 +625,31 @@ func TestRuleValuesDeduplicated(t *testing.T) {
 		}
 	}
 	t.Fatal("правило не найдено")
+}
+
+// Из нескольких зеркал в конфиг ядра попадает первое; старое поле Mirror тоже учитывается.
+func TestFirstMirrorUsedInConfig(t *testing.T) {
+	s := sample()
+	s.Download.Mirrors = []string{"https://one.example/", "https://two.example/"}
+	res, _ := Singbox(s)
+	if !strings.Contains(res.Config, "https://one.example/https://raw.githubusercontent.com/SagerNet/sing-geoip") || strings.Contains(res.Config, "two.example") {
+		t.Error("в конфиге должно быть только первое зеркало")
+	}
+	s = sample()
+	s.Download.Mirror = "https://old.example/"
+	s.Download.Mirrors = []string{"https://new.example/"}
+	s.Normalize()
+	if s.Download.Mirror != "" || len(s.Download.Mirrors) != 2 || s.Download.Mirrors[0] != "https://old.example" {
+		t.Errorf("старое зеркало должно переехать в список первым: %+v", s.Download)
+	}
+	s.Download.Mirrors = append(s.Download.Mirrors, "ghfast.top")
+	bad := false
+	for _, is := range s.Validate() {
+		if is.Level == "error" && strings.Contains(is.Message, "ghfast.top") {
+			bad = true
+		}
+	}
+	if !bad {
+		t.Error("адрес без схемы должен быть ошибкой")
+	}
 }
