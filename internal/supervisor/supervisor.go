@@ -18,6 +18,7 @@ import (
 	"corepanel/internal/firewall"
 	"corepanel/internal/gen"
 	"corepanel/internal/installer"
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
 	"corepanel/internal/rulesets"
@@ -410,11 +411,11 @@ func (s *Supervisor) watchRoutesLocked(sc *firewall.Scripts, done <-chan struct{
 
 // rulesetFetcher скачивает текстовые наборы: напрямую (с зеркалом, если оно включено), затем через прокси ядра.
 func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets.Fetcher {
-	mirror := ""
+	var mirrors []string
 	if v := set.General.UpdateVia; v == "" || v == "direct" {
-		mirror = set.Download.Mirror
+		mirrors = mirror.List(set.Download)
 	}
-	return rulesets.NewFetcher(mirror, proxyPort)
+	return rulesets.NewFetcher(mirrors, proxyPort)
 }
 
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.

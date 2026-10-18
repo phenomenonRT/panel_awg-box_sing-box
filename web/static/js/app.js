@@ -1,6 +1,7 @@
 import { h, clear, toast, toastErr, spinner, note, onEdit } from './ui.js';
 import { get, post, setAuthHandler } from './api.js';
 import * as st from './state.js';
+import { initI18n, lang, nextLang, setLang, tr, LANGS } from './i18n.js';
 
 const S = st.S;
 const ROUTES = [
@@ -73,6 +74,8 @@ function cycleTheme(btn) {
 
 function startApp() {
   started = true;
+  const nl = nextLang();
+  const langBtn = h('button', { class: 'btn sm ghost', title: 'Язык интерфейса: ' + LANGS.find((l) => l[0] === lang())[2], onclick: () => setLang(nl[0]) }, lang().toUpperCase());
   const themeBtn = h('button', { class: 'btn sm ghost', title: 'Переключить тему', onclick: () => cycleTheme(themeBtn) }, 'Тема: ' + THEMES.find((t) => t[0] === curTheme())[1]);
   const svc = h('a', { href: '#/dashboard', class: 'small', style: 'text-decoration:none;color:inherit' });
   const coreB = h('span', { class: 'badge acc' });
@@ -82,7 +85,7 @@ function startApp() {
   main = h('main', { id: 'main', tabindex: '-1' });
   barEl = h('div', { id: 'bar', hidden: true });
   clear(app).append(
-    h('header', { class: 'top' }, burger, h('span', { class: 'brand' }, 'core', h('i', 'panel')), coreB, verB, h('span', { class: 'grow' }), svc, themeBtn),
+    h('header', { class: 'top' }, burger, h('span', { class: 'brand' }, 'core', h('i', 'panel')), coreB, verB, h('span', { class: 'grow' }), svc, langBtn, themeBtn),
     h('div', { class: 'shell' }, nav, main), h('div', { class: 'scrim', onclick: () => document.body.classList.remove('nav') }), barEl);
 
   const paint = () => {
@@ -128,7 +131,7 @@ function drawBar() {
     h('span', { class: 'grow small' }, busy ? h('span', { class: 'spin' }) : null,
       busy ? 'Выполняется…' : dirty ? 'Есть несохранённые изменения' : S.needApply ? 'Сохранено, но ещё не применено к ядру' : 'Замечания к настройкам'),
     issues.length ? h('button', { class: 'btn sm ghost', onclick: () => { S.issues = []; st.emit(); } }, 'Скрыть замечания') : null,
-    dirty ? h('button', { class: 'btn', disabled: busy, onclick: async () => { if (confirm('Отменить все несохранённые изменения?')) { st.revert(); route(); } } }, 'Отменить') : null,
+    dirty ? h('button', { class: 'btn', disabled: busy, onclick: async () => { if (confirm(tr('Отменить все несохранённые изменения?'))) { st.revert(); route(); } } }, 'Отменить') : null,
     dirty ? h('button', { class: 'btn', disabled: busy, onclick: () => doSave(false) }, 'Сохранить') : null,
     (dirty || S.needApply) ? h('button', { class: 'btn primary', disabled: busy, onclick: () => doSave(true) }, S.needApply && !dirty ? 'Применить' : 'Сохранить и применить') : null));
   clear(barEl).append(...kids);
@@ -160,4 +163,5 @@ async function route() {
   }
 }
 
+await initI18n();
 boot();

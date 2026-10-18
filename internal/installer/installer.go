@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
 )
@@ -287,13 +288,6 @@ func httpClient(d model.Download) (*http.Client, error) {
 	return &http.Client{Transport: tr, Timeout: 0}, nil
 }
 
-func withMirror(d model.Download, u string) string {
-	if m := strings.TrimSpace(d.Mirror); m != "" {
-		return strings.TrimRight(m, "/") + "/" + u
-	}
-	return u
-}
-
 type release struct {
 	Tag    string `json:"tag_name"`
 	Assets []struct {
@@ -319,25 +313,32 @@ func getJSON(ctx context.Context, c *http.Client, u string, v any) error {
 }
 
 // ResolveLatestTag узнаёт последнюю версию без API: по редиректу /releases/latest.
+// Зеркала перебираются по порядку, затем прямой адрес GitHub.
 func resolveLatestTag(ctx context.Context, c *http.Client, d model.Download, repo string) (string, error) {
 	cc := *c
 	cc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	req, _ := http.NewRequestWithContext(ctx, "HEAD", withMirror(d, "https://github.com/"+repo+"/releases/latest"), nil)
-	req.Header.Set("User-Agent", "corepanel")
-	resp, err := cc.Do(req)
-	if err != nil {
-		return "", err
+	var errs []string
+	for _, u := range mirror.Variants(mirror.List(d), "https://github.com/"+repo+"/releases/latest") {
+		req, _ := http.NewRequestWithContext(ctx, "HEAD", u, nil)
+		req.Header.Set("User-Agent", "corepanel")
+		resp, err := cc.Do(req)
+		if err != nil {
+			errs = append(errs, mirror.Host(u)+": "+err.Error())
+			continue
+		}
+		resp.Body.Close()
+		loc := resp.Header.Get("Location")
+		if i := strings.LastIndex(loc, "/tag/"); i >= 0 {
+			return path.Base(loc[i+5:]), nil
+		}
+		errs = append(errs, fmt.Sprintf("%s: HTTP %d", mirror.Host(u), resp.StatusCode))
 	}
-	resp.Body.Close()
-	loc := resp.Header.Get("Location")
-	if i := strings.LastIndex(loc, "/tag/"); i >= 0 {
-		return path.Base(loc[i+5:]), nil
-	}
-	return "", fmt.Errorf("не удалось определить последнюю версию (HTTP %d)", resp.StatusCode)
+	return "", fmt.Errorf("не удалось определить последнюю версию (%s)", strings.Join(errs, "; "))
 }
 
+// target — файл релиза. URLs — адреса одного и того же файла по порядку: зеркала, затем GitHub напрямую.
 type target struct {
-	URL     string
+	URLs    []string
 	Name    string
 	Size    int64
 	Version string
@@ -369,7 +370,7 @@ func (in *Installer) resolve(ctx context.Context, c *http.Client, d model.Downlo
 		for _, name := range picked {
 			for _, a := range rel.Assets {
 				if a.Name == name {
-					out = append(out, target{URL: withMirror(d, a.URL), Name: name, Size: a.Size, Version: strings.TrimPrefix(rel.Tag, "v")})
+					out = append(out, target{URLs: mirror.Variants(mirror.List(d), a.URL), Name: name, Size: a.Size, Version: strings.TrimPrefix(rel.Tag, "v")})
 				}
 			}
 		}
@@ -399,16 +400,21 @@ func (in *Installer) resolve(ctx context.Context, c *http.Client, d model.Downlo
 		} else {
 			name = fmt.Sprintf("sing-box-%s-linux-%s.tar.gz", ver, v)
 		}
-		u := withMirror(d, fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name))
-		req, _ := http.NewRequestWithContext(ctx, "HEAD", u, nil)
-		req.Header.Set("User-Agent", "corepanel")
-		resp, err := c.Do(req)
-		if err != nil {
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			out = append(out, target{URL: u, Name: name, Size: resp.ContentLength, Version: ver})
+		all := mirror.Variants(mirror.List(d), fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name))
+		for i, u := range all {
+			req, _ := http.NewRequestWithContext(ctx, "HEAD", u, nil)
+			req.Header.Set("User-Agent", "corepanel")
+			resp, err := c.Do(req)
+			if err != nil {
+				continue
+			}
+			resp.Body.Close()
+			if resp.StatusCode == 200 {
+				// рабочий адрес первым, остальные — запасные на случай обрыва
+				urls := append([]string{u}, append(append([]string{}, all[:i]...), all[i+1:]...)...)
+				out = append(out, target{URLs: urls, Name: name, Size: resp.ContentLength, Version: ver})
+				break
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -649,17 +655,39 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 }
 
 // fetchExtract качает архив и пишет распакованный бинарник в dst (sing-box: tar.gz, amnezia-box: готовый бинарник).
+// fetchExtract скачивает файл релиза: адреса перебираются по порядку, пока какой-нибудь не ответит.
+// Если загрузка уже началась и оборвалась, ошибка возвращается как есть (файл частично записан).
 func (in *Installer) fetchExtract(ctx context.Context, c *http.Client, tg target, core, dst string) error {
-	req, _ := http.NewRequestWithContext(ctx, "GET", tg.URL, nil)
-	req.Header.Set("User-Agent", "corepanel")
-	resp, err := c.Do(req)
-	if err != nil {
-		return fmt.Errorf("загрузка не удалась: %v", err)
+	var errs []string
+	for i, u := range tg.URLs {
+		req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+		req.Header.Set("User-Agent", "corepanel")
+		resp, err := c.Do(req)
+		if err == nil && resp.StatusCode != 200 {
+			resp.Body.Close()
+			err = fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		if err != nil {
+			errs = append(errs, mirror.Host(u)+": "+err.Error())
+			if i+1 < len(tg.URLs) {
+				in.Job.set(func(j *Job) {
+					j.Message = "Не вышло через " + mirror.Host(u) + ", пробую следующий адрес…"
+				})
+			}
+			continue
+		}
+		if len(tg.URLs) > 1 {
+			in.Job.set(func(j *Job) {
+				j.Message = "Скачиваю и распаковываю " + tg.Name + " (" + mirror.Host(u) + ")"
+			})
+		}
+		return in.extractBody(resp, tg, core, dst)
 	}
+	return fmt.Errorf("загрузка не удалась: %s", strings.Join(errs, "; "))
+}
+
+func (in *Installer) extractBody(resp *http.Response, tg target, core, dst string) error {
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("загрузка не удалась: HTTP %d", resp.StatusCode)
-	}
 	total := resp.ContentLength
 	if total <= 0 {
 		total = tg.Size

@@ -102,7 +102,7 @@ func TestFetchExtractStream(t *testing.T) {
 	srv2 := serveArchive(t, "s.tgz", gz(t, tb.Bytes()))
 	defer srv2.Close()
 	dst2 := filepath.Join(dir, "sing-box.new")
-	if err := in.fetchExtract(context.Background(), srv2.Client(), target{URL: srv2.URL}, model.CoreSingbox, dst2); err != nil {
+	if err := in.fetchExtract(context.Background(), srv2.Client(), target{URLs: []string{srv2.URL}}, model.CoreSingbox, dst2); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(dst2); !bytes.Equal(b, payload) {
@@ -116,7 +116,7 @@ func TestFetchExtractStream(t *testing.T) {
 	full := gz(t, payload)
 	srv3 := serveArchive(t, "cut.gz", full[:len(full)/2])
 	defer srv3.Close()
-	if err := in.fetchExtract(context.Background(), srv3.Client(), target{URL: srv3.URL}, model.CoreSingbox, filepath.Join(dir, "cut")); err == nil {
+	if err := in.fetchExtract(context.Background(), srv3.Client(), target{URLs: []string{srv3.URL}}, model.CoreSingbox, filepath.Join(dir, "cut")); err == nil {
 		t.Fatal("ожидалась ошибка для обрезанного архива")
 	}
 }
@@ -268,5 +268,29 @@ func TestVersionCached(t *testing.T) {
 	_ = os.Chtimes(bin, time.Now().Add(time.Hour), time.Now().Add(time.Hour))
 	if v, err := Version(context.Background(), "amnezia", bin); err != nil || v != "2.0.0" {
 		t.Fatalf("v=%q err=%v", v, err)
+	}
+}
+
+// Первое зеркало не отвечает — загрузка идёт со второго адреса.
+func TestFetchExtractFallsBackToNextURL(t *testing.T) {
+	dir := t.TempDir()
+	in := New(platform.Info{})
+	payload := append([]byte("\x7fELF"), []byte("amnezia-binary-content")...)
+	bad := httptest.NewServer(http.NotFoundHandler())
+	defer bad.Close()
+	good := serveArchive(t, "ok.bin", payload)
+	defer good.Close()
+	dst := filepath.Join(dir, "amnezia-box.new")
+	tg := target{URLs: []string{bad.URL + "/x", "http://127.0.0.1:1/x", good.URL}}
+	if err := in.fetchExtract(context.Background(), good.Client(), tg, model.CoreAmnezia, dst); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dst); !bytes.Equal(b, payload) {
+		t.Fatalf("содержимое не совпало: %q", b)
+	}
+	// все адреса недоступны — ошибка называет каждый
+	err := in.fetchExtract(context.Background(), good.Client(), target{URLs: []string{bad.URL + "/x", "http://127.0.0.1:1/x"}}, model.CoreAmnezia, dst)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Fatalf("ожидалась ошибка с HTTP 404, получили %v", err)
 	}
 }

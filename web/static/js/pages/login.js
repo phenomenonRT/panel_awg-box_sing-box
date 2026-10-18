@@ -1,5 +1,6 @@
 import { h, clear, pw, field, note } from '../ui.js';
 import { post } from '../api.js';
+import { lang, nextLang, setLang, LANGS } from '../i18n.js';
 
 // Вход нужен только если включён в разделе «Система»; пароль — тот же, что у root по SSH.
 export function login(root, session, done) {
@@ -18,6 +19,8 @@ export function login(root, session, done) {
   }, h('h2', 'Вход'), err,
   field('Пароль root', pw(f, 'password'), 'Тот же пароль, что и для входа на роутер по SSH.'),
   h('button', { class: 'btn primary', type: 'submit', style: 'width:100%' }, 'Войти'));
-  box.append(brand, form);
+  const nl = nextLang();
+  const langBtn = h('button', { type: 'button', class: 'btn sm ghost', style: 'margin-top:10px', title: 'Язык интерфейса: ' + LANGS.find((l) => l[0] === lang())[2], onclick: () => setLang(nl[0]) }, lang().toUpperCase() + ' → ' + nl[1]);
+  box.append(brand, form, langBtn);
   form.querySelector('input[type=password]').focus();
 }

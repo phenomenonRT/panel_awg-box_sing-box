@@ -308,3 +308,8 @@ main{min-width:0}
 .dp-row{display:flex;gap:8px;align-items:stretch}
 .dp-row .dp-in{flex:1;min-width:0}
 .dp-test{white-space:nowrap}
+.mirrors textarea{width:100%}
+.mirror-res{margin-top:6px}
+.mirror-row{display:flex;gap:8px;align-items:center;padding:2px 0}
+.mirror-name{overflow-wrap:anywhere}
+.mirror-row .bad{color:var(--err)}
