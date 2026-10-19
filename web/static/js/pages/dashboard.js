@@ -253,20 +253,42 @@ export default async function (root) {
     delays[name] = 0;
     if (lastErr) delayErr[name] = lastErr; else delete delayErr[name];
   }
+  // Поиск по подключениям: подстрока в адресе, домене, порте, источнике, цепочке или правиле; несколько слов — все сразу.
+  let connRaw = null, connQ = '';
+  const connText = (c) => {
+    const m = c.metadata || {};
+    return [m.host, m.destinationIP, m.destinationPort, m.sourceIP, m.network, m.type, c.rule, c.rulePayload, ...(c.chains || [])].join(' ').toLowerCase();
+  };
+  function drawConns() {
+    if (!connRaw || !ui.connBody) return;
+    const words = connQ.toLowerCase().split(/\s+/).filter(Boolean);
+    const all = connRaw.slice().sort((a, b) => (b.download + b.upload) - (a.download + a.upload));
+    const hit = words.length ? all.filter((c) => { const t = connText(c); return words.every((w) => t.includes(w)); }) : all;
+    const list = hit.slice(0, 80);
+    ui.connTitle.textContent = 'Подключения' + (words.length ? ' (найдено ' + hit.length + ' из ' + all.length + ')' : list.length ? ' (топ ' + list.length + ' по объёму)' : '');
+    clear(ui.connBody).append(list.length ? h('div', { class: 'tw' }, h('table', h('thead', h('tr', ['Назначение', 'Сеть', 'Цепочка', 'Правило', '↑', '↓', 'Источник'].map((x) => h('th', x)))),
+      h('tbody', list.map((c) => {
+        const m = c.metadata || {};
+        return h('tr', h('td', { class: 'mono' }, (m.host || m.destinationIP || '?') + ':' + (m.destinationPort || '')), h('td', m.network || ''),
+          h('td', (c.chains || []).slice().reverse().join(' → ')), h('td', c.rule || ''), h('td', { class: 'nowrap' }, fmtBytes(c.upload)),
+          h('td', { class: 'nowrap' }, fmtBytes(c.download)), h('td', { class: 'mono' }, m.sourceIP || ''));
+      })))) : h('div', { class: 'empty' }, words.length ? 'Ничего не найдено по запросу «' + connQ.trim() + '»' : 'Активных подключений нет'));
+  }
+  function buildConns() {
+    ui.connTitle = h('h2', 'Подключения');
+    ui.connBody = h('div');
+    const q = h('input', { type: 'search', placeholder: 'Поиск: IP, домен, порт, цепочка, правило', 'aria-label': 'Поиск по подключениям', value: connQ, autocomplete: 'off', spellcheck: 'false', style: 'max-width:340px' });
+    q.addEventListener('input', () => { connQ = q.value; drawConns(); });
+    clear(ui.conns).append(h('div', { class: 'card' }, ui.connTitle, h('div', { style: 'margin:0 0 10px' }, q), ui.connBody));
+  }
   async function loadConns() {
     try {
       const r = await get('api/clash/connections', { signal: ctl.signal });
       if (!alive) return;
-      const list = (r.connections || []).slice().sort((a, b) => (b.download + b.upload) - (a.download + a.upload)).slice(0, 80);
-      ui.tot.textContent = 'Всего: ↑ ' + fmtBytes(r.uploadTotal) + ', ↓ ' + fmtBytes(r.downloadTotal) + ' · подключений: ' + (r.connections || []).length;
-      clear(ui.conns).append(h('div', { class: 'card' }, h('h2', 'Подключения' + (list.length ? ' (топ ' + list.length + ' по объёму)' : '')),
-        list.length ? h('div', { class: 'tw' }, h('table', h('thead', h('tr', ['Назначение', 'Сеть', 'Цепочка', 'Правило', '↑', '↓', 'Источник'].map((x) => h('th', x)))),
-          h('tbody', list.map((c) => {
-            const m = c.metadata || {};
-            return h('tr', h('td', { class: 'mono' }, (m.host || m.destinationIP || '?') + ':' + (m.destinationPort || '')), h('td', m.network || ''),
-              h('td', (c.chains || []).slice().reverse().join(' → ')), h('td', c.rule || ''), h('td', { class: 'nowrap' }, fmtBytes(c.upload)),
-              h('td', { class: 'nowrap' }, fmtBytes(c.download)), h('td', { class: 'mono' }, m.sourceIP || ''));
-          })))) : h('div', { class: 'empty' }, 'Активных подключений нет')));
+      connRaw = r.connections || [];
+      ui.tot.textContent = 'Всего: ↑ ' + fmtBytes(r.uploadTotal) + ', ↓ ' + fmtBytes(r.downloadTotal) + ' · подключений: ' + connRaw.length;
+      if (!ui.connBody || !ui.connBody.isConnected) buildConns();
+      drawConns();
     } catch (e) { /* ядро могло остановиться — следующая итерация разберётся */ }
   }
   function drawOff() {
