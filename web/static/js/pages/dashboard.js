@@ -1,4 +1,4 @@
-import { errNote, apd, h, clear, pageHead, badge, note, fmtBytes, fmtDur, toast, toastErr, spinner } from '../ui.js';
+import { errNote, apd, h, clear, pageHead, badge, note, fmtBytes, fmtDur, toast, toastErr, spinner, copy } from '../ui.js';
 import { get, post, put, streamJSON } from '../api.js';
 import * as st from '../state.js';
 import { transparentNote } from '../transparent.js';
@@ -253,33 +253,81 @@ export default async function (root) {
     delays[name] = 0;
     if (lastErr) delayErr[name] = lastErr; else delete delayErr[name];
   }
-  // Поиск по подключениям: подстрока в адресе, домене, порте, источнике, цепочке или правиле; несколько слов — все сразу.
-  let connRaw = null, connQ = '';
+  // Подключения: поиск (подстрока в адресе, домене, порте, источнике, цепочке или правиле; несколько слов — все сразу),
+  // фильтр по протоколу и сортировка по клику на заголовок.
+  let connRaw = null, connQ = '', connNet = '';
+  const connSort = { k: 'vol', dir: -1 };
   const connText = (c) => {
     const m = c.metadata || {};
     return [m.host, m.destinationIP, m.destinationPort, m.sourceIP, m.network, m.type, c.rule, c.rulePayload, ...(c.chains || [])].join(' ').toLowerCase();
   };
+  const connDst = (c) => { const m = c.metadata || {}; return (m.host || m.destinationIP || '?'); };
+  const connKey = {
+    dst: (c) => connDst(c).toLowerCase(), net: (c) => (c.metadata || {}).network || '', vol: (c) => (c.download || 0) + (c.upload || 0),
+    up: (c) => c.upload || 0, down: (c) => c.download || 0, src: (c) => (c.metadata || {}).sourceIP || '',
+  };
+  // Подсвечивает найденные слова в тексте.
+  function hl(text, words) {
+    text = String(text);
+    if (!words.length) return text;
+    const re = new RegExp('(' + words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi');
+    return text.split(re).map((part, i) => (i % 2 ? h('mark', part) : part));
+  }
+  function chainPills(c) {
+    const ch = (c.chains || []).slice().reverse();
+    if (!ch.length) return h('span', { class: 'mute' }, '—');
+    const out = [];
+    ch.forEach((x, i) => {
+      if (i) out.push(h('span', { class: 'arr' }, '›'));
+      out.push(h('span', { class: 'badge' + (x === 'direct' ? '' : x === 'block' ? ' err' : i === ch.length - 1 ? ' acc' : '') }, x));
+    });
+    return h('span', { class: 'chain' }, out);
+  }
   function drawConns() {
     if (!connRaw || !ui.connBody) return;
     const words = connQ.toLowerCase().split(/\s+/).filter(Boolean);
-    const all = connRaw.slice().sort((a, b) => (b.download + b.upload) - (a.download + a.upload));
-    const hit = words.length ? all.filter((c) => { const t = connText(c); return words.every((w) => t.includes(w)); }) : all;
+    let hit = connRaw;
+    if (connNet) hit = hit.filter((c) => ((c.metadata || {}).network || '').toLowerCase() === connNet);
+    if (words.length) hit = hit.filter((c) => { const t = connText(c); return words.every((w) => t.includes(w)); });
+    const key = connKey[connSort.k];
+    hit = hit.slice().sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * connSort.dir; });
     const list = hit.slice(0, 80);
-    ui.connTitle.textContent = 'Подключения' + (words.length ? ' (найдено ' + hit.length + ' из ' + all.length + ')' : list.length ? ' (топ ' + list.length + ' по объёму)' : '');
-    clear(ui.connBody).append(list.length ? h('div', { class: 'tw' }, h('table', h('thead', h('tr', ['Назначение', 'Сеть', 'Цепочка', 'Правило', '↑', '↓', 'Источник'].map((x) => h('th', x)))),
+    const filtered = words.length || connNet;
+    ui.connTitle.textContent = 'Подключения';
+    ui.connCount.textContent = filtered ? 'найдено ' + hit.length + ' из ' + connRaw.length : hit.length > 80 ? 'показано 80 из ' + hit.length : connRaw.length + '';
+    ui.connClear.hidden = !connQ;
+    ui.connNets.forEach(([v, b]) => b.classList.toggle('on', v === connNet));
+    const th = (k, label, cls) => h('th', { class: (cls || '') + ' sortable', 'aria-sort': connSort.k === k ? (connSort.dir > 0 ? 'ascending' : 'descending') : 'none' },
+      h('button', { type: 'button', onclick: () => { if (connSort.k === k) connSort.dir *= -1; else { connSort.k = k; connSort.dir = (k === 'dst' || k === 'src' || k === 'net') ? 1 : -1; } drawConns(); } },
+        label, h('span', { class: 'sa' }, connSort.k === k ? (connSort.dir > 0 ? '▲' : '▼') : '')));
+    clear(ui.connBody).append(list.length ? h('div', { class: 'tw' }, h('table', { class: 'conns' },
+      h('thead', h('tr', th('dst', 'Назначение'), th('net', 'Сеть'), h('th', 'Цепочка'), h('th', 'Правило'), th('up', '↑', 'num'), th('down', '↓', 'num'), th('src', 'Источник'))),
       h('tbody', list.map((c) => {
         const m = c.metadata || {};
-        return h('tr', h('td', { class: 'mono' }, (m.host || m.destinationIP || '?') + ':' + (m.destinationPort || '')), h('td', m.network || ''),
-          h('td', (c.chains || []).slice().reverse().join(' → ')), h('td', c.rule || ''), h('td', { class: 'nowrap' }, fmtBytes(c.upload)),
-          h('td', { class: 'nowrap' }, fmtBytes(c.download)), h('td', { class: 'mono' }, m.sourceIP || ''));
-      })))) : h('div', { class: 'empty' }, words.length ? 'Ничего не найдено по запросу «' + connQ.trim() + '»' : 'Активных подключений нет'));
+        const addr = (m.destinationIP || '') + ':' + (m.destinationPort || '');
+        const main = m.host ? m.host : addr;
+        const dst = h('td', { class: 'cdst', title: 'Нажмите, чтобы скопировать', onclick: () => copy(m.host || m.destinationIP || '') },
+          h('div', { class: 'mono hostn' }, hl(main, words)), m.host ? h('div', { class: 'mono csub' }, hl(addr, words)) : null);
+        return h('tr', dst, h('td', { class: 'cnet' }, h('span', { class: 'badge net-' + (m.network || '') }, hl((m.network || '').toUpperCase() || '—', words))),
+          h('td', { class: 'cch' }, chainPills(c)), h('td', { class: 'crule' }, hl(c.rule || '', words)),
+          h('td', { class: 'nowrap num up' }, h('span', { class: 'lbl' }, '↑ '), fmtBytes(c.upload)),
+          h('td', { class: 'nowrap num down' }, h('span', { class: 'lbl' }, '↓ '), fmtBytes(c.download)),
+          h('td', { class: 'mono csrc' }, hl(m.sourceIP || '', words)));
+      })))) : h('div', { class: 'empty' }, filtered ? 'Ничего не найдено. Измените запрос или сбросьте фильтр.' : 'Активных подключений нет'));
   }
   function buildConns() {
     ui.connTitle = h('h2', 'Подключения');
+    ui.connCount = h('span', { class: 'badge' });
     ui.connBody = h('div');
-    const q = h('input', { type: 'search', placeholder: 'Поиск: IP, домен, порт, цепочка, правило', 'aria-label': 'Поиск по подключениям', value: connQ, autocomplete: 'off', spellcheck: 'false', style: 'max-width:340px' });
+    const q = h('input', { type: 'text', class: 'cq', placeholder: 'Поиск: IP, домен, порт, цепочка, правило', 'aria-label': 'Поиск по подключениям', value: connQ, autocomplete: 'off', spellcheck: 'false' });
+    ui.connClear = h('button', { type: 'button', class: 'cq-x', 'aria-label': 'Очистить', title: 'Очистить', hidden: !connQ, onclick: () => { q.value = ''; connQ = ''; drawConns(); q.focus(); } }, '×');
     q.addEventListener('input', () => { connQ = q.value; drawConns(); });
-    clear(ui.conns).append(h('div', { class: 'card' }, ui.connTitle, h('div', { style: 'margin:0 0 10px' }, q), ui.connBody));
+    q.addEventListener('keydown', (e) => { if (e.key === 'Escape' && q.value) { q.value = ''; connQ = ''; drawConns(); } });
+    ui.connNets = [['', 'Все'], ['tcp', 'TCP'], ['udp', 'UDP']].map(([v, label]) => [v, h('button', { type: 'button', class: 'chip', onclick: () => { connNet = v; drawConns(); } }, label)]);
+    clear(ui.conns).append(h('div', { class: 'card' },
+      h('div', { class: 'conn-head' }, ui.connTitle, ui.connCount),
+      h('div', { class: 'conn-bar' }, h('div', { class: 'cq-wrap' }, q, ui.connClear), h('div', { class: 'chips' }, ui.connNets.map((x) => x[1]))),
+      ui.connBody));
   }
   async function loadConns() {
     try {
