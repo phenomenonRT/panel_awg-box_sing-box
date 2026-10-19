@@ -56,10 +56,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ inputs.version }}" out/* \
-            --title "corepanel ${{ inputs.version }}" \
-            --notes "Бинарники: corepanel-linux-<arch>. Пакеты: corepanel_<версия>_<arch>_<openwrt|entware>.ipk. Какой выбрать — в README." \
-            --target "${{ github.sha }}"
+          tag="v${{ inputs.version }}"
+          notes="Бинарники: corepanel-linux-<arch>. Пакеты: corepanel_<версия>_<arch>_<openwrt|entware>.ipk. Какой выбрать — в README."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            # релиз с таким тегом уже есть (повторный запуск): обновляем файлы и описание, а не падаем
+            gh release upload "$tag" out/* --clobber
+            gh release edit "$tag" --title "corepanel ${{ inputs.version }}" --notes "$notes"
+          else
+            gh release create "$tag" out/* \
+              --title "corepanel ${{ inputs.version }}" \
+              --notes "$notes" \
+              --target "${{ github.sha }}"
+          fi
 
       - name: Убрать старые релизы (остаются 3 последних)
         if: ${{ inputs.release }}
