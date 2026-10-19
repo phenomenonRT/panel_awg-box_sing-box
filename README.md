@@ -3,6 +3,18 @@
 Веб-интерфейс (Go + JS + CSS, один статический бинарник ~8 МБ, без зависимостей) для **OpenWrt**  (Entware)**.
 Позволяет выбрать и установить ядро **amnezia-box** (форк sing-box с AmneziaWG), добавить VPN/прокси-узлы, настроить маршрутизацию, DNS, TUN и прозрачный прокси — и запустить всё из браузера.
 
+
+## Скриншоты
+
+Данные на снимках демонстрационные (адреса из зарезервированных диапазонов, ключи ненастоящие).
+
+| | |
+|---|---|
+| ![Обзор](docs/screenshots/dashboard.png)<br>**Обзор**: сервис, трафик, выбор узла, поиск по подключениям | ![Тёмная тема](docs/screenshots/dashboard-dark.png)<br>**Тёмная тема** |
+| ![Узлы и VPN](docs/screenshots/nodes.png)<br>**Узлы и VPN**: AmneziaWG, VLESS Reality, Hysteria2, системный VPN | ![Группы](docs/screenshots/groups.png)<br>**Группы**: urltest и selector |
+| ![Маршрутизация](docs/screenshots/routing.png)<br>**Маршрутизация**: правила и наборы правил | ![DNS](docs/screenshots/dns.png)<br>**DNS**: remote, local и bootstrap |
+| ![English](docs/screenshots/dashboard-en.png)<br>**English interface** | ![Телефон](docs/screenshots/dashboard-mobile.png)<br>**Телефон** |
+
 ## Возможности
 
 - **Выбор ядра** и установка/обновление с GitHub (подбор архитектуры: mipsle, mips, arm, arm64, amd64…), несколько зеркал GitHub (пробуются по очереди, затем напрямую; кнопка «Проверить зеркала») и прокси для загрузки, свой бинарник.
