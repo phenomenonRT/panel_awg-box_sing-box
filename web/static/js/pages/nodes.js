@@ -240,6 +240,7 @@ function nodeForm(d, rebuild) {
   if (t === 'iface') {
     out.append(fgrid(field('Интерфейс', ifaceSelect(d, 'bind_interface', '— выберите интерфейс —'),
       'Туннель должен быть уже поднят в системе (OpenWrt: Сеть → Интерфейсы; Keenetic: подключение SSTP/L2TP/PPTP/OpenVPN). Панель направит через него трафик по вашим правилам; сам туннель не настраивается и не запускается.')));
+    out.append(note('warn', 'Если MTU системного интерфейса больше 1280, sing-box может работать некорректно: часть сайтов и соединений будет зависать или обрываться. Поставьте у интерфейса MTU 1280 или меньше (OpenWrt: Сеть → Интерфейсы → Изменить → Дополнительно → MTU) и перезапустите ядро.'));
     out.append(help('Такой узел можно добавить в группу: группа fallback или urltest сама переключится на другой узел, если системный VPN откажет.'));
     return out;
   }
@@ -275,11 +276,12 @@ function nodeForm(d, rebuild) {
     } }, 'создать пару');
     const hint = S.settings.core === 'amnezia' ? null : note('warn', 'AmneziaWG работает только на ядре amnezia-box. Установите его в разделе «Компоненты» и выберите активным ядром.');
     out.append(sec('AmneziaWG', hint,
+      note('warn', 'MTU больше 1280 может нарушить работу sing-box: соединения будут зависать или обрываться. Оставьте 1280 или меньше.'),
       fgrid(field('Приватный ключ', h('div', { class: 'pw' }, pw(d, 'private_key'), gen)),
         field('Публичный ключ пира', txt(d, 'peer_public_key')), field('Pre-shared key', pw(d, 'pre_shared_key')),
         field('Адреса интерфейса', csv(d, 'addresses', { ph: '10.8.0.2/32' })),
         field('Allowed IPs', csv(d, 'allowed_ips', { ph: '0.0.0.0/0, ::/0' })),
-        field('MTU', num(d, 'mtu', { min: 0 }))),
+        field('MTU', num(d, 'mtu', { min: 0 }), 'Если MTU больше 1280, sing-box может работать некорректно (соединения зависают или обрываются). Рекомендуется 1280 или меньше.')),
       h('h3', { style: 'margin-top:12px' }, 'Обфускация'),
       h('p', { class: 'small mute' }, 'Значения должны совпадать с серверными. Пустое поле или 0 — параметр не передаётся.'),
       fgrid(field('Jc', num(a, 'jc', { min: 0 })), field('Jmin', num(a, 'jmin', { min: 0 })), field('Jmax', num(a, 'jmax', { min: 0 })),
