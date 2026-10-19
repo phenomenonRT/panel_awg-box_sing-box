@@ -307,9 +307,10 @@ export default async function (root) {
         const addr = (m.destinationIP || '') + ':' + (m.destinationPort || '');
         const main = m.host ? m.host : addr;
         const dst = h('td', { class: 'cdst', title: 'Нажмите, чтобы скопировать', onclick: () => copy(m.host || m.destinationIP || '') },
-          h('div', { class: 'mono hostn' }, hl(main, words)), h('div', { class: 'mono csub' }, m.host ? hl(addr, words) : null, m.sourceIP ? [m.host ? ' · ' : '', '← ', hl(m.sourceIP, words)] : null));
+          h('div', { class: 'mono hostn' }, hl(main, words)), m.host ? h('div', { class: 'mono csub' }, hl(addr, words)) : null);
         return h('tr', dst, h('td', { class: 'cnet' }, h('span', { class: 'badge net-' + (m.network || '') }, hl((m.network || '').toUpperCase() || '—', words))),
-          h('td', { class: 'cch' }, chainPills(c)), h('td', { class: 'crule', title: c.rule || '' }, hl(c.rule || '', words)),
+          h('td', { class: 'cch' }, chainPills(c)), h('td', { class: 'crule', title: (c.rule || '') + (m.sourceIP ? '\n← ' + m.sourceIP : '') },
+            h('div', { class: 'rl' }, hl(c.rule || '', words)), m.sourceIP ? h('div', { class: 'mono csub' }, '← ', hl(m.sourceIP, words)) : null),
           h('td', { class: 'nowrap num ctr', title: 'Всего ' + fmtBytes((c.upload || 0) + (c.download || 0)) },
             h('div', { class: 'up' }, '↑ ', fmtBytes(c.upload)), h('div', { class: 'down' }, '↓ ', fmtBytes(c.download))));
       })))) : h('div', { class: 'empty' }, filtered ? 'Ничего не найдено. Измените запрос или сбросьте фильтр.' : 'Активных подключений нет'));

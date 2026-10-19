@@ -332,17 +332,17 @@ table.conns th.sortable button:focus-visible{outline:2px solid var(--accent);out
 table.conns th.num button{justify-content:flex-end}
 .sa{font-size:9px;color:var(--accent);min-width:8px}
 table.conns{table-layout:fixed;font-size:12.5px}
-table.conns th,table.conns td{padding:4px 8px}
+table.conns th,table.conns td{padding:3px 8px}
 table.conns td{vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 table.conns th.sortable{padding:0}
-table.conns th:nth-child(2){width:74px}table.conns th:nth-child(3){width:150px}table.conns th:nth-child(4){width:24%}table.conns th:nth-child(5){width:92px}
+table.conns th:nth-child(2){width:62px}table.conns th:nth-child(3){width:136px}table.conns th:nth-child(4){width:150px}table.conns th:nth-child(5){width:92px}
 table.conns tbody tr:hover td{background:var(--surface2)}
 td.cdst{cursor:pointer}
-.hostn{font-weight:600;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}.csub{color:var(--mute);font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.hostn{font-weight:600;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;line-height:1.3}.csub{color:var(--mute);font-size:11px;overflow:hidden;text-overflow:ellipsis}
 .chain{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}.chain .arr{color:var(--mute)}
 .chain .badge,td.cnet .badge{padding:0 7px;font-size:11.5px}
 td.cnet,td.cch{overflow:visible;text-overflow:clip}
-td.crule{color:var(--mute);font-size:12px}
+td.crule{color:var(--mute);font-size:12px}td.crule .rl{overflow:hidden;text-overflow:ellipsis;line-height:1.3}
 td.csrc{color:var(--mute);font-size:11.5px}
 td.num{text-align:right;font-variant-numeric:tabular-nums;line-height:1.3}
 td.ctr .up{color:var(--ink)}td.ctr .down{color:var(--ink)}
