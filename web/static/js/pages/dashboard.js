@@ -301,18 +301,17 @@ export default async function (root) {
       h('button', { type: 'button', onclick: () => { if (connSort.k === k) connSort.dir *= -1; else { connSort.k = k; connSort.dir = (k === 'dst' || k === 'src' || k === 'net') ? 1 : -1; } drawConns(); } },
         label, h('span', { class: 'sa' }, connSort.k === k ? (connSort.dir > 0 ? '▲' : '▼') : '')));
     clear(ui.connBody).append(list.length ? h('div', { class: 'tw' }, h('table', { class: 'conns' },
-      h('thead', h('tr', th('dst', 'Назначение'), th('net', 'Сеть'), h('th', 'Цепочка'), h('th', 'Правило'), th('up', '↑', 'num'), th('down', '↓', 'num'), th('src', 'Источник'))),
+      h('thead', h('tr', th('dst', 'Назначение'), th('net', 'Сеть'), h('th', 'Цепочка'), h('th', 'Правило'), th('vol', 'Трафик', 'num'))),
       h('tbody', list.map((c) => {
         const m = c.metadata || {};
         const addr = (m.destinationIP || '') + ':' + (m.destinationPort || '');
         const main = m.host ? m.host : addr;
         const dst = h('td', { class: 'cdst', title: 'Нажмите, чтобы скопировать', onclick: () => copy(m.host || m.destinationIP || '') },
-          h('div', { class: 'mono hostn' }, hl(main, words)), m.host ? h('div', { class: 'mono csub' }, hl(addr, words)) : null);
+          h('div', { class: 'mono hostn' }, hl(main, words)), h('div', { class: 'mono csub' }, m.host ? hl(addr, words) : null, m.sourceIP ? [m.host ? ' · ' : '', '← ', hl(m.sourceIP, words)] : null));
         return h('tr', dst, h('td', { class: 'cnet' }, h('span', { class: 'badge net-' + (m.network || '') }, hl((m.network || '').toUpperCase() || '—', words))),
-          h('td', { class: 'cch' }, chainPills(c)), h('td', { class: 'crule' }, hl(c.rule || '', words)),
-          h('td', { class: 'nowrap num up' }, h('span', { class: 'lbl' }, '↑ '), fmtBytes(c.upload)),
-          h('td', { class: 'nowrap num down' }, h('span', { class: 'lbl' }, '↓ '), fmtBytes(c.download)),
-          h('td', { class: 'mono csrc' }, hl(m.sourceIP || '', words)));
+          h('td', { class: 'cch' }, chainPills(c)), h('td', { class: 'crule', title: c.rule || '' }, hl(c.rule || '', words)),
+          h('td', { class: 'nowrap num ctr', title: 'Всего ' + fmtBytes((c.upload || 0) + (c.download || 0)) },
+            h('div', { class: 'up' }, '↑ ', fmtBytes(c.upload)), h('div', { class: 'down' }, '↓ ', fmtBytes(c.download))));
       })))) : h('div', { class: 'empty' }, filtered ? 'Ничего не найдено. Измените запрос или сбросьте фильтр.' : 'Активных подключений нет'));
   }
   function buildConns() {
