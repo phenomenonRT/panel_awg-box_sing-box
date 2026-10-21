@@ -4,6 +4,8 @@
 set -eu
 cd "$(dirname "$0")/.."
 VER="${1:-0.1.0}"
+# в метаданных пакета dev-версия «0.1.82-dev.3» записывается как «0.1.82~dev3» (так opkg считает её старше 0.1.82)
+PKGVER=$(printf %s "$VER" | sed 's/-dev\.\([0-9]*\)/~dev\1/;s/-dev$/~dev0/')
 OUT="$PWD/dist/ipk"; mkdir -p "$OUT"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
@@ -48,7 +50,7 @@ EOS
   size=$(du -sk "$w/data" | cut -f1); size=$((size*1024))
   cat > "$w/control/control" <<EOS
 Package: corepanel
-Version: $VER
+Version: $PKGVER
 Depends: libc
 Source: corepanel
 Section: net

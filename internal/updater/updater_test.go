@@ -23,6 +23,8 @@ func TestNewer(t *testing.T) {
 	}{
 		{"v0.1.25", "0.1.24", true}, {"0.1.24", "0.1.24", false}, {"0.1.9", "0.1.10", false},
 		{"0.2.0", "0.1.99", true}, {"1.0", "0.9.9", true}, {"0.1.25", "dev", false}, {"x", "0.1.0", false},
+		{"0.1.82-dev.3", "0.1.82-dev.2", true}, {"0.1.82-dev.2", "0.1.82-dev.10", false}, {"0.1.83-dev.1", "0.1.82-dev.9", true},
+		{"0.1.82", "0.1.82-dev.9", true}, {"0.1.82-dev.9", "0.1.82", false}, {"v0.1.82-dev.1", "0.1.81", true},
 	} {
 		if got := Newer(c.a, c.b); got != c.want {
 			t.Errorf("Newer(%q,%q)=%v, want %v", c.a, c.b, got, c.want)
@@ -39,6 +41,17 @@ func TestParseSums(t *testing.T) {
 
 func fakeRelease(t *testing.T, tag, script string, badSum bool) *httptest.Server {
 	t.Helper()
+	return fakeReleases(t, script, badSum, relSpec{tag, ChannelOf(tag) == ChannelDev})
+}
+
+type relSpec struct {
+	tag string
+	pre bool
+}
+
+// fakeReleases отдаёт список релизов (новые сверху); у каждого есть бинарник и сумма.
+func fakeReleases(t *testing.T, script string, badSum bool, rels ...relSpec) *httptest.Server {
+	t.Helper()
 	sum := sha256.Sum256([]byte(script))
 	hexsum := hex.EncodeToString(sum[:])
 	if badSum {
@@ -48,8 +61,12 @@ func fakeRelease(t *testing.T, tag, script string, badSum bool) *httptest.Server
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/latest":
-			fmt.Fprintf(w, `{"tag_name":%q,"html_url":"https://example.test/r","assets":[{"name":"corepanel-linux-amd64","browser_download_url":%q},{"name":"SHA256SUMS.txt","browser_download_url":%q}]}`,
-				tag, srv.URL+"/bin", srv.URL+"/sums")
+			var items []string
+			for _, r := range rels {
+				items = append(items, fmt.Sprintf(`{"tag_name":%q,"prerelease":%v,"html_url":"https://example.test/r","assets":[{"name":"corepanel-linux-amd64","browser_download_url":%q},{"name":"SHA256SUMS.txt","browser_download_url":%q}]}`,
+					r.tag, r.pre, srv.URL+"/bin", srv.URL+"/sums"))
+			}
+			fmt.Fprint(w, "["+strings.Join(items, ",")+"]")
 		case "/bin":
 			fmt.Fprint(w, script)
 		case "/sums":
@@ -64,9 +81,9 @@ func fakeRelease(t *testing.T, tag, script string, badSum bool) *httptest.Server
 
 func newUpd(t *testing.T, srvURL, cur string) (*Updater, string, *int) {
 	t.Helper()
-	old := latestURL
-	latestURL = srvURL + "/latest"
-	t.Cleanup(func() { latestURL = old })
+	old := releasesURL
+	releasesURL = srvURL + "/latest"
+	t.Cleanup(func() { releasesURL = old })
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "corepanel")
 	os.WriteFile(exe, []byte("#!/bin/sh\necho "+cur+"\n"), 0o755)
@@ -134,5 +151,39 @@ func TestNoUpdateWhenSame(t *testing.T) {
 	}
 	if err := u.Apply(); err == nil {
 		t.Fatal("Apply без обновления должен отказывать")
+	}
+}
+
+// Обычная панель не видит предварительных релизов, dev-панель — обычных.
+func TestChannels(t *testing.T) {
+	script := "#!/bin/sh\necho 0.1.83\n"
+	srv := fakeReleases(t, script, false, relSpec{"v0.1.83-dev.2", true}, relSpec{"v0.1.82", false}, relSpec{"v0.1.82-dev.1", true})
+
+	u, _, _ := newUpd(t, srv.URL, "0.1.81")
+	info := u.Check(t.Context())
+	if info.Channel != ChannelRelease || info.Latest != "0.1.82" || !info.Available {
+		t.Fatalf("обычная сборка должна видеть только 0.1.82: %+v", info)
+	}
+
+	d, _, _ := newUpd(t, srv.URL, "0.1.81-dev.1")
+	info = d.Check(t.Context())
+	if info.Channel != ChannelDev || info.Latest != "0.1.83-dev.2" || !info.Available {
+		t.Fatalf("dev-сборка должна видеть только 0.1.83-dev.2: %+v", info)
+	}
+
+	// у dev нет обновления, если новых предварительных нет, даже когда есть более новый обычный релиз
+	only := fakeReleases(t, script, false, relSpec{"v0.2.0", false})
+	d2, _, _ := newUpd(t, only.URL, "0.1.81-dev.1")
+	if info := d2.Check(t.Context()); info.Available || info.Reason == "" {
+		t.Fatalf("dev не должен получать обычный релиз: %+v", info)
+	}
+	// и наоборот
+	pre := fakeReleases(t, script, false, relSpec{"v0.2.0-dev.1", true})
+	u2, _, _ := newUpd(t, pre.URL, "0.1.81")
+	if info := u2.Check(t.Context()); info.Available || info.Reason == "" {
+		t.Fatalf("обычная сборка не должна получать dev: %+v", info)
+	}
+	if err := u2.Apply(); err == nil {
+		t.Fatal("Apply без доступного обновления должен отказывать")
 	}
 }

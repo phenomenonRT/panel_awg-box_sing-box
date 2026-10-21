@@ -42,9 +42,11 @@ export default async function (root) {
     const busy = !!j.running || applying;
     apd(updBox, h('h2', 'Обновление'),
       h('dl', { class: 'kv' }, h('dt', 'Установлена'), h('dd', 'v' + String(u.current || '—').replace(/^v/, '')),
+        h('dt', 'Канал'), h('dd', u.channel === 'dev' ? h('span', { class: 'badge warn' }, 'dev — предварительные релизы') : 'стабильные релизы'),
         h('dt', 'Последняя версия'), h('dd', u.latest ? 'v' + u.latest : '—'),
         h('dt', 'Проверено'), h('dd', fmtTime(u.checked_at))),
       u.available ? note('ok', 'Доступна новая версия v' + u.latest + '.') : (u.latest ? note('', 'Установлена последняя версия.') : null),
+      u.channel === 'dev' ? note('warn', 'Это dev-сборка: она получает только предварительные релизы и может работать нестабильно. Чтобы перейти на стабильную версию, установите обычный релиз вручную (пакетом или файлом).') : null,
       u.reason ? note(u.available ? 'warn' : 'err', u.reason) : null,
       j.error ? note('err', j.error) : null,
       h('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px;margin:10px 0' },

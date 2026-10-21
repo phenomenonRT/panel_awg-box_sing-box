@@ -28,8 +28,24 @@ import (
 	"corepanel/internal/platform"
 )
 
-// latestURL — последний релиз (переопределяется в тестах).
-var latestURL = "https://api.github.com/repos/phenomenonRT/panel_awg-box_sing-box/releases/latest"
+// releasesURL — список релизов, новые сверху (переопределяется в тестах).
+var releasesURL = "https://api.github.com/repos/phenomenonRT/panel_awg-box_sing-box/releases?per_page=30"
+
+// Каналы обновления. Канал определяется самой сборкой: версия вида «0.1.82-dev.3» — это dev-сборка
+// (предварительные релизы), любая другая — обычная. Каждая ставит обновления только своего канала,
+// поэтому стабильная панель никогда не получит предварительную версию и наоборот.
+const (
+	ChannelRelease = "release"
+	ChannelDev     = "dev"
+)
+
+// ChannelOf возвращает канал по строке версии или тегу.
+func ChannelOf(v string) string {
+	if strings.Contains(v, "-dev") {
+		return ChannelDev
+	}
+	return ChannelRelease
+}
 
 // ResumeMarker — файл в каталоге данных: запасной путь, когда передать работающее ядро не удалось
 // и оно было остановлено — после обновления его нужно запустить снова.
@@ -38,6 +54,7 @@ const ResumeMarker = "resume-core"
 // Info — результат проверки.
 type Info struct {
 	Current   string `json:"current"`
+	Channel   string `json:"channel"` // release | dev
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
 	PageURL   string `json:"page_url,omitempty"`
@@ -79,27 +96,38 @@ func New(version string, info platform.Info, settings func() *model.Settings, re
 	return &Updater{Version: version, Info: info, Settings: settings, Restart: restart, ExePath: os.Executable}
 }
 
-// parseVersion разбирает «v0.1.24» → [0 1 24].
-func parseVersion(v string) ([]int, bool) {
+// parseVersion разбирает «v0.1.24» → [0 1 24], dev=0 и «0.1.24-dev.3» → [0 1 24], dev=3.
+func parseVersion(v string) (nums []int, dev int, ok bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if v == "" {
-		return nil, false
+		return nil, 0, false
 	}
-	var out []int
+	if i := strings.Index(v, "-dev"); i >= 0 {
+		suf := strings.TrimPrefix(strings.TrimPrefix(v[i+4:], "."), "-")
+		if suf != "" {
+			n, err := strconv.Atoi(suf)
+			if err != nil {
+				return nil, 0, false
+			}
+			dev = n
+		}
+		v = v[:i]
+	}
 	for _, p := range strings.Split(v, ".") {
 		n, err := strconv.Atoi(p)
 		if err != nil {
-			return nil, false
+			return nil, 0, false
 		}
-		out = append(out, n)
+		nums = append(nums, n)
 	}
-	return out, true
+	return nums, dev, true
 }
 
 // Newer сообщает, что latest новее current. При непонятной версии — false.
+// Для одинаковых номеров dev-сборка старше обычной (0.1.82-dev.9 < 0.1.82).
 func Newer(latest, current string) bool {
-	a, ok1 := parseVersion(latest)
-	b, ok2 := parseVersion(current)
+	a, da, ok1 := parseVersion(latest)
+	b, db, ok2 := parseVersion(current)
 	if !ok1 || !ok2 {
 		return false
 	}
@@ -114,6 +142,13 @@ func Newer(latest, current string) bool {
 		if x != y {
 			return x > y
 		}
+	}
+	la, lb := ChannelOf(latest) == ChannelDev, ChannelOf(current) == ChannelDev
+	switch {
+	case la && lb:
+		return da > db
+	case lb && !la:
+		return true
 	}
 	return false
 }
@@ -136,12 +171,13 @@ func (u *Updater) State() State {
 	defer u.mu.Unlock()
 	i := u.last
 	i.Current = u.Version
+	i.Channel = ChannelOf(u.Version)
 	return State{Info: i, Job: Job{Running: u.job.Running, Finished: u.job.Finished, Error: u.job.Error, Output: append([]string{}, u.job.Output...)}}
 }
 
 // Check запрашивает последний релиз.
 func (u *Updater) Check(ctx context.Context) Info {
-	info := Info{Current: u.Version, CheckedAt: time.Now().Unix()}
+	info := Info{Current: u.Version, Channel: ChannelOf(u.Version), CheckedAt: time.Now().Unix()}
 	fail := func(f string, a ...any) Info {
 		info.Reason = fmt.Sprintf(f, a...)
 		u.mu.Lock()
@@ -153,7 +189,7 @@ func (u *Updater) Check(ctx context.Context) Info {
 	if err != nil {
 		return fail("%v", err)
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", latestURL, nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", releasesURL, nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := cl.Do(req)
 	if err != nil {
@@ -163,16 +199,41 @@ func (u *Updater) Check(ctx context.Context) Info {
 	if resp.StatusCode != 200 {
 		return fail("GitHub вернул HTTP %d", resp.StatusCode)
 	}
-	var rel struct {
-		Tag    string `json:"tag_name"`
-		URL    string `json:"html_url"`
-		Assets []struct {
+	type relT struct {
+		Tag        string `json:"tag_name"`
+		URL        string `json:"html_url"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+		Assets     []struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
 		} `json:"assets"`
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
+	var list []relT
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&list); err != nil {
 		return fail("не удалось разобрать ответ GitHub")
+	}
+	// Берём самый новый релиз своего канала: dev-сборка — только предварительные (тег с «-dev»),
+	// обычная — только не предварительные и без «-dev» в теге.
+	ch := info.Channel
+	var rel *relT
+	for i := range list {
+		r := &list[i]
+		if r.Draft || ChannelOf(r.Tag) != ch || r.Prerelease != (ch == ChannelDev) {
+			continue
+		}
+		if _, _, ok := parseVersion(r.Tag); !ok {
+			continue
+		}
+		if rel == nil || Newer(r.Tag, rel.Tag) {
+			rel = r
+		}
+	}
+	if rel == nil {
+		if ch == ChannelDev {
+			return fail("предварительных релизов (dev) на GitHub пока нет")
+		}
+		return fail("стабильных релизов на GitHub пока нет")
 	}
 	info.Latest = strings.TrimPrefix(rel.Tag, "v")
 	info.PageURL = rel.URL
@@ -197,7 +258,7 @@ func (u *Updater) Check(ctx context.Context) Info {
 	default:
 		info.CanApply = true
 	}
-	if _, ok := parseVersion(u.Version); !ok && info.Reason == "" {
+	if _, _, ok := parseVersion(u.Version); !ok && info.Reason == "" {
 		info.Reason = "версия этой сборки (" + u.Version + ") не числовая — сравнить нельзя"
 	}
 	u.mu.Lock()
@@ -233,6 +294,10 @@ func (u *Updater) Apply() error {
 		return errors.New("нет доступного обновления: сначала нажмите «Проверить»")
 	}
 	asset, sums, ver := u.asset, u.sums, u.last.Latest
+	if ChannelOf(ver) != ChannelOf(u.Version) {
+		u.mu.Unlock()
+		return errors.New("версия другого канала (dev и обычные сборки не смешиваются)")
+	}
 	u.job = Job{Running: true}
 	u.mu.Unlock()
 	go func() { u.finish(u.run(asset, sums, ver)) }()

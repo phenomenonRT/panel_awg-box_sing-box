@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия (например 0.1.2)"
+        description: "Версия: 0.1.82 — обычный релиз, 0.1.82-dev.1 — предварительный (dev)"
         required: true
-        default: "0.1.81"
+        default: "0.1.82"
       release:
         description: "Создать GitHub Release с файлами"
         type: boolean
@@ -21,6 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Канал по номеру версии
+        run: |
+          v="${{ inputs.version }}"
+          if printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+-dev\.[0-9]+$'; then
+            echo "PRE=true" >> "$GITHUB_ENV"
+            echo "Предварительный релиз (dev): $v"
+          elif printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+            echo "PRE=false" >> "$GITHUB_ENV"
+            echo "Обычный релиз: $v"
+          else
+            echo "Неверная версия «$v»: нужно 0.1.82 или 0.1.82-dev.1" >&2
+            exit 1
+          fi
 
       - uses: actions/setup-go@v5
         with:
@@ -38,11 +52,22 @@ jobs:
       - name: Сборка пакетов .ipk (OpenWrt и Entware)
         run: scripts/mkipk.sh "${{ inputs.version }}"
 
+      - name: Сборка пакетов .apk (OpenWrt 25.x)
+        run: python3 -I scripts/mkapk.py "${{ inputs.version }}"
+
+      - name: Проверка .apk настоящим apk (Alpine)
+        continue-on-error: true
+        run: |
+          f=$(ls dist/apk/corepanel_*_amd64_openwrt.apk)
+          docker run --rm -v "$PWD/dist/apk:/p:ro" alpine:3.22 sh -c \
+            "apk add --allow-untrusted --no-scripts --initdb --root /tmp/r --no-network /p/$(basename "$f") && ls -l /tmp/r/usr/bin/corepanel /tmp/r/etc/init.d/corepanel && apk info --root /tmp/r -v"
+
       - name: Подготовка файлов и контрольные суммы
         run: |
           mkdir -p out
           cp dist/corepanel-linux-* out/
           cp dist/ipk/*.ipk out/
+          cp dist/apk/*.apk out/
           cd out && sha256sum * > SHA256SUMS.txt && ls -l
 
       - uses: actions/upload-artifact@v4
@@ -58,25 +83,32 @@ jobs:
         run: |
           tag="v${{ inputs.version }}"
           notes="Бинарники: corepanel-linux-<arch>. Пакеты: corepanel_<версия>_<arch>_<openwrt|entware>.ipk. Какой выбрать — в README."
+          if [ "$PRE" = true ]; then
+            notes="Предварительная (dev) сборка: ставится только dev-панелью, стабильная её не увидит. $notes"
+            pre="--prerelease"
+          else
+            pre="--prerelease=false"
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             # релиз с таким тегом уже есть (повторный запуск): обновляем файлы и описание, а не падаем
             gh release upload "$tag" out/* --clobber
-            gh release edit "$tag" --title "corepanel ${{ inputs.version }}" --notes "$notes"
+            gh release edit "$tag" --title "corepanel ${{ inputs.version }}" --notes "$notes" $pre
           else
             gh release create "$tag" out/* \
               --title "corepanel ${{ inputs.version }}" \
               --notes "$notes" \
-              --target "${{ github.sha }}"
+              --target "${{ github.sha }}" \
+              $pre
           fi
 
-      - name: Убрать старые релизы (остаются 3 последних)
+      - name: Убрать старые релизы (остаются 3 последних каждого канала)
         if: ${{ inputs.release }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Новые сверху; всё, что ниже третьего релиза, удаляем вместе с тегами.
-          gh release list --limit 100 --json createdAt,tagName \
-            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' | while read -r t; do
+          # Отдельно обычные и предварительные: новые сверху, всё ниже третьего удаляем вместе с тегами.
+          gh release list --limit 100 --json createdAt,tagName,isPrerelease \
+            --jq '[sort_by(.createdAt) | reverse | .[] | select(.isPrerelease == (env.PRE == "true"))] | .[3:] | .[].tagName' | while read -r t; do
             [ -n "$t" ] && gh release delete "$t" --yes --cleanup-tag
           done
