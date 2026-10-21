@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия: 0.1.82 — обычный релиз, 0.1.82-dev.1 — предварительный (dev)"
+        description: "Версия обычного релиза (например 0.1.82). Предварительные сборки — в workflow «Сборка corepanel (dev)»"
         required: true
         default: "0.1.82"
       release:
@@ -22,17 +22,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Канал по номеру версии
+      - name: Проверка версии (только обычный релиз)
         run: |
           v="${{ inputs.version }}"
-          if printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+-dev\.[0-9]+$'; then
-            echo "PRE=true" >> "$GITHUB_ENV"
-            echo "Предварительный релиз (dev): $v"
-          elif printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
-            echo "PRE=false" >> "$GITHUB_ENV"
-            echo "Обычный релиз: $v"
-          else
-            echo "Неверная версия «$v»: нужно 0.1.82 или 0.1.82-dev.1" >&2
+          if ! printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+            echo "Неверная версия «$v»: нужно вида 0.1.82. Предварительные (dev) собирает workflow «Сборка corepanel (dev)»." >&2
             exit 1
           fi
 
@@ -83,32 +77,25 @@ jobs:
         run: |
           tag="v${{ inputs.version }}"
           notes="Бинарники: corepanel-linux-<arch>. Пакеты: corepanel_<версия>_<arch>_<openwrt|entware>.ipk. Какой выбрать — в README."
-          if [ "$PRE" = true ]; then
-            notes="Предварительная (dev) сборка: ставится только dev-панелью, стабильная её не увидит. $notes"
-            pre="--prerelease"
-          else
-            pre="--prerelease=false"
-          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             # релиз с таким тегом уже есть (повторный запуск): обновляем файлы и описание, а не падаем
             gh release upload "$tag" out/* --clobber
-            gh release edit "$tag" --title "corepanel ${{ inputs.version }}" --notes "$notes" $pre
+            gh release edit "$tag" --title "corepanel ${{ inputs.version }}" --notes "$notes" --prerelease=false
           else
             gh release create "$tag" out/* \
               --title "corepanel ${{ inputs.version }}" \
               --notes "$notes" \
-              --target "${{ github.sha }}" \
-              $pre
+              --target "${{ github.sha }}"
           fi
 
-      - name: Убрать старые релизы (остаются 3 последних каждого канала)
+      - name: Убрать старые релизы (остаются 3 последних обычных; dev-релизы не трогаются)
         if: ${{ inputs.release }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Отдельно обычные и предварительные: новые сверху, всё ниже третьего удаляем вместе с тегами.
+          # Среди обычных релизов: новые сверху, всё ниже третьего удаляем вместе с тегами.
           gh release list --limit 100 --json createdAt,tagName,isPrerelease \
-            --jq '[sort_by(.createdAt) | reverse | .[] | select(.isPrerelease == (env.PRE == "true"))] | .[3:] | .[].tagName' | while read -r t; do
+            --jq '[sort_by(.createdAt) | reverse | .[] | select(.isPrerelease == false)] | .[3:] | .[].tagName' | while read -r t; do
             [ -n "$t" ] && gh release delete "$t" --yes --cleanup-tag
           done

@@ -1,0 +1,118 @@
+name: Сборка corepanel (dev)
+
+# Предварительная (dev) сборка. Запуск вручную: вкладка Actions → «Сборка corepanel (dev)» → Run workflow.
+# Релиз помечается как Pre-release; его видят и ставят только dev-панели (версия вида 0.1.83-dev.1),
+# обычные панели обновляются лишь до обычных релизов. Номер можно не указывать: подставится следующий.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия вида 0.1.83-dev.1; пусто — следующая по номеру автоматически"
+        required: false
+        default: ""
+      release:
+        description: "Создать GitHub Pre-release с файлами"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Номер dev-версии
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="${{ inputs.version }}"
+          if [ -z "$v" ]; then
+            # основа — следующий патч после последнего обычного релиза (или после версии из build.yml);
+            # номер dev — следующий после уже выпущенных dev с той же основой
+            last=$(gh release list --limit 100 --json tagName,isPrerelease,createdAt \
+              --jq '[.[] | select(.isPrerelease == true)] | sort_by(.createdAt) | reverse | .[0].tagName // ""' | sed 's/^v//')
+            [ -n "$last" ] || last=$(grep -m1 -Eo 'default: "[0-9.]+"' .github/workflows/build.yml | grep -Eo '[0-9.]+')
+            base=$(printf %s "$last" | awk -F. -v OFS=. '{$NF=$NF+1; print}')
+            n=$(gh release list --limit 100 --json tagName --jq '.[].tagName' \
+              | sed -n "s/^v$(printf %s "$base" | sed 's/\./\\./g')-dev\.\([0-9][0-9]*\)$/\1/p" | sort -n | tail -1)
+            v="$base-dev.$(( ${n:-0} + 1 ))"
+          fi
+          if ! printf %s "$v" | grep -Eq '^[0-9]+(\.[0-9]+)+-dev\.[0-9]+$'; then
+            echo "Неверная версия «$v»: нужно вида 0.1.83-dev.1" >&2
+            exit 1
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "Версия dev-сборки: $v"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Проверка (vet и тесты)
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test ./...
+
+      - name: Сборка бинарников (8 архитектур)
+        run: scripts/build.sh "$VERSION"
+
+      - name: Сборка пакетов .ipk (OpenWrt и Entware)
+        run: scripts/mkipk.sh "$VERSION"
+
+      - name: Сборка пакетов .apk (OpenWrt 25.x)
+        run: python3 -I scripts/mkapk.py "$VERSION"
+
+      - name: Проверка .apk настоящим apk (Alpine)
+        continue-on-error: true
+        run: |
+          f=$(ls dist/apk/corepanel_*_amd64_openwrt.apk)
+          docker run --rm -v "$PWD/dist/apk:/p:ro" alpine:3.22 sh -c \
+            "apk add --allow-untrusted --no-scripts --initdb --root /tmp/r --no-network /p/$(basename "$f") && ls -l /tmp/r/usr/bin/corepanel /tmp/r/etc/init.d/corepanel && apk info --root /tmp/r -v"
+
+      - name: Подготовка файлов и контрольные суммы
+        run: |
+          mkdir -p out
+          cp dist/corepanel-linux-* out/
+          cp dist/ipk/*.ipk out/
+          cp dist/apk/*.apk out/
+          cd out && sha256sum * > SHA256SUMS.txt && ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: corepanel-${{ env.VERSION }}
+          path: out/*
+          retention-days: 30
+
+      - name: GitHub Release
+        if: ${{ inputs.release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          notes="Предварительная (dev) сборка: её ставит и обновляет только dev-панель (версия 0.1.x-dev.N), обычная панель этот релиз не увидит. Бинарники: corepanel-linux-<arch>. Пакеты: corepanel_<версия>_<arch>_<openwrt|entware>.ipk и .apk (OpenWrt 25.x)."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" out/* --clobber
+            gh release edit "$tag" --title "corepanel $VERSION (dev)" --notes "$notes" --prerelease
+          else
+            gh release create "$tag" out/* \
+              --title "corepanel $VERSION (dev)" \
+              --notes "$notes" \
+              --prerelease \
+              --target "${{ github.sha }}"
+          fi
+
+      - name: Убрать старые релизы (остаются 3 последних dev; обычные не трогаются)
+        if: ${{ inputs.release }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Среди dev-релизов: новые сверху, всё ниже третьего удаляем вместе с тегами.
+          gh release list --limit 100 --json createdAt,tagName,isPrerelease \
+            --jq '[sort_by(.createdAt) | reverse | .[] | select(.isPrerelease == true)] | .[3:] | .[].tagName' | while read -r t; do
+            [ -n "$t" ] && gh release delete "$t" --yes --cleanup-tag
+          done
