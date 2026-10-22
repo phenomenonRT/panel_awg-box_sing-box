@@ -49,8 +49,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)}
 .rs-picker{position:relative;display:inline-block}
 .rs-picker>summary{list-style:none}
 .rs-picker>summary::-webkit-details-marker{display:none}
-.rs-preset-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:40;width:min(380px,85vw);max-height:min(340px,55vh);overflow:auto;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overscroll-behavior:contain}
-.rs-preset-option{margin:0;padding:4px 2px}
+.rs-chevron{display:inline-block;font-size:12px;line-height:1;transition:transform .15s ease}
+.rs-picker[open]>.btn .rs-chevron{transform:rotate(180deg)}
+.rs-preset-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:40;width:min(520px,90vw);max-height:min(520px,70vh);overflow:auto;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overscroll-behavior:contain}
+.rs-preset-option{margin:0;padding:6px 4px}
+.rs-source{overflow-wrap:anywhere;margin:-3px 0 10px;line-height:1.4}
 .pw{display:flex;gap:4px}.pw input{flex:1}
 .durbox{display:flex;gap:6px}.durbox input{flex:1;min-width:0}.durbox select{width:auto;flex:0 0 auto}
 .help{display:inline-grid;place-items:center;width:15px;height:15px;margin-left:5px;border:1px solid var(--line);border-radius:50%;font-size:10px;color:var(--mute);cursor:help;position:relative;vertical-align:1px;background:var(--surface2)}

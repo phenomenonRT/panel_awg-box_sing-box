@@ -106,6 +106,18 @@ export default async function (root) {
       const more = usedElsewhere(r.name);
       const addedAt = Number(r.added_at);
       const addedDate = Number.isFinite(addedAt) && addedAt > 0 ? new Date(addedAt).toLocaleDateString() : '';
+      const source = String(r.url || '').trim();
+      let sourceRow = null;
+      if (source) {
+        let sourceLink = source;
+        try {
+          const parsed = new URL(source);
+          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+            sourceLink = h('a', { href: parsed.href, target: '_blank', rel: 'noopener noreferrer', title: parsed.href }, parsed.href);
+          }
+        } catch { /* Keep invalid or incomplete addresses visible as plain text. */ }
+        sourceRow = h('div', { class: 'small mute rs-source' }, 'Источник данных: ', sourceLink);
+      }
       const outSel = h('select', { 'aria-label': 'Куда направить трафик набора ' + r.name, onchange: (e) => { if (!r.name) { toast('Сначала укажите имя набора', 'err'); e.target.value = ''; return; } setRule(r.name, e.target.value); drawSets(); } },
         dest().map(([v, t]) => h('option', { value: v, selected: v === (cur ? cur.outbound : '') }, t)));
       const status = cur ? h('span', { class: 'badge ok' }, 'направляется → ' + cur.outbound)
@@ -115,6 +127,7 @@ export default async function (root) {
         h('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:8px' },
           h('b', r.name || 'новый набор'), addedDate ? h('span', { class: 'small mute' }, 'добавлен ' + addedDate) : null, status, h('span', { class: 'grow' }),
           h('button', { class: 'btn sm danger', onclick: () => { const old = ruleOf(r.name); if (old) s.rules.splice(s.rules.indexOf(old), 1); s.rule_sets.splice(i, 1); st.touch(); ed.redraw(); drawSets(); } }, 'Удалить')),
+        sourceRow,
         fgrid(field('Куда направить трафик', outSel, 'Создаёт правило «этот набор → выбранный выход». Правила работают сверху вниз: новое добавляется в конец списка правил, а всё, что не подошло, уходит в «Final».'),
           field('Адрес списка (URL)', txt(r, 'url', { ph: 'https://…/set.srs' }), 'Файл .srs или .json — ядро скачивает и обновляет его само. Обычный список (.lst, .txt: домен в строке, можно подсети) панель скачивает и преобразует сама.')),
         h('details', { style: 'margin-top:6px' }, h('summary', { class: 'small' }, 'Дополнительно: имя, формат, обновление'),
@@ -126,7 +139,9 @@ export default async function (root) {
 
   const presetSel = { out: '' };
   const selectedPresets = new Set();
-  const presetSummary = h('summary', { class: 'btn', 'aria-label': 'Выбрать шаблоны наборов правил' }, 'Выбрать шаблоны');
+  const presetSummaryText = h('span', 'Выбрать шаблоны');
+  const presetSummary = h('summary', { class: 'btn', 'aria-label': 'Выбрать шаблоны наборов правил' }, presetSummaryText,
+    h('span', { class: 'rs-chevron', 'aria-hidden': 'true' }, '▾'));
   const presetPicker = h('details', { class: 'rs-picker' }, presetSummary,
     h('div', { class: 'rs-preset-menu' }, PRESETS.map((p, i) => h('label', { class: 'check rs-preset-option' },
       h('input', { type: 'checkbox', onchange: (e) => {
@@ -135,7 +150,7 @@ export default async function (root) {
       } }), p[0]))));
   function updatePresetSummary() {
     const label = selectedPresets.size ? 'Выбрано шаблонов: ' + selectedPresets.size : 'Выбрать шаблоны';
-    presetSummary.textContent = label;
+    presetSummaryText.textContent = label;
     presetSummary.setAttribute('aria-label', label);
   }
   const g = s.general;
