@@ -171,8 +171,10 @@ func (s *Server) Handler() http.Handler {
 	api("POST", "update/check", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		s.Updater.Check(ctx)
-		ok(w, s.Updater.State())
+		info := s.Updater.Check(ctx)
+		state := s.Updater.State()
+		state.Info = info
+		ok(w, state)
 	}, true)
 	api("POST", "update/channel", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
@@ -187,11 +189,20 @@ func (s *Server) Handler() http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		s.Updater.CheckChannel(ctx, in.Channel)
-		ok(w, s.Updater.State())
+		info := s.Updater.CheckChannel(ctx, in.Channel)
+		state := s.Updater.State()
+		state.Info = info
+		ok(w, state)
 	}, true)
 	api("POST", "update/apply", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.Updater.Apply(); err != nil {
+		var in struct {
+			TargetChannel string `json:"target_channel"`
+			Latest        string `json:"latest"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if err := s.Updater.ApplyChecked(in.TargetChannel, in.Latest); err != nil {
 			fail(w, 409, err.Error())
 			return
 		}

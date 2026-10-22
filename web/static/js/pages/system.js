@@ -50,7 +50,7 @@ export default async function (root) {
       if (!(await confirmBox('Перейти на ' + targetName + ' v' + checked.latest + '? Панель установит версию и перезапустится.', 'Перейти'))) return;
       applying = true;
       drawUpd(checked);
-      drawUpd(await post('api/update/apply'));
+      drawUpd(await post('api/update/apply', { target_channel: target, latest: checked.latest }));
       watch(checked.current);
     } catch (x) {
       applying = false;
@@ -84,7 +84,11 @@ export default async function (root) {
           const switchingBuild = u.target_channel && u.target_channel !== u.channel;
           const targetName = u.target_channel === 'dev' ? 'dev-версию' : 'стабильную версию';
           if (!(await confirmBox((switchingBuild ? 'Перейти на ' + targetName : 'Обновить панель') + ' v' + u.latest + '? Панель установит версию и перезапустится.', switchingBuild ? 'Перейти' : 'Обновить'))) return;
-          try { applying = true; drawUpd(await post('api/update/apply')); watch(u.current); } catch (x) { applying = false; toastErr(x); }
+          try {
+            applying = true;
+            drawUpd(await post('api/update/apply', { target_channel: u.target_channel || u.channel, latest: u.latest }));
+            watch(u.current);
+          } catch (x) { applying = false; toastErr(x); }
         } }, u.target_channel && u.target_channel !== u.channel ? 'Установить ' + (u.target_channel === 'dev' ? 'dev-' : 'стабильную ') + 'версию v' + u.latest : 'Обновить до v' + u.latest) : null,
         u.page_url ? h('a', { class: 'btn ghost', href: u.page_url, target: '_blank', rel: 'noopener noreferrer' }, 'Что нового') : null),
       chk(S.settings.update, 'auto', 'Автообновление', 'Раз в несколько часов панель проверяет релизы на GitHub и сама ставит новую версию (ядро при этом ненадолго перезапускается). По умолчанию выключено. Сохраните настройки, чтобы изменение вступило в силу.'),

@@ -87,14 +87,20 @@ type Updater struct {
 	// ExePath — путь к исполняемому файлу панели (в тестах подменяется).
 	ExePath func() (string, error)
 
-	mu          sync.Mutex
-	last        Info
-	job         Job
+	mu      sync.Mutex
+	checkMu sync.Mutex
+	last    Info
+	job     Job
+	checks  map[string]checkResult
+}
+
+type checkResult struct {
+	info        Info
 	asset, sums string
 }
 
 func New(version string, info platform.Info, settings func() *model.Settings, restart func() error) *Updater {
-	return &Updater{Version: version, Info: info, Settings: settings, Restart: restart, ExePath: os.Executable}
+	return &Updater{Version: version, Info: info, Settings: settings, Restart: restart, ExePath: os.Executable, checks: make(map[string]checkResult)}
 }
 
 // parseVersion разбирает «v0.1.24» → [0 1 24], dev=0 и «0.1.24-dev.3» → [0 1 24], dev=3.
@@ -182,13 +188,19 @@ func (u *Updater) Check(ctx context.Context) Info {
 }
 
 // CheckChannel проверяет последний релиз выбранного канала. Другой канал разрешён только
-// для явного переключения пользователем; Apply сохраняет выбранный канал в last.
+// для явного переключения пользователем; результат сохраняется отдельно для каждого канала.
 func (u *Updater) CheckChannel(ctx context.Context, target string) Info {
+	// Сериализуем сетевые проверки: более старая проверка не должна завершиться позже
+	// и затереть состояние более нового выбора пользователя.
+	u.checkMu.Lock()
+	defer u.checkMu.Unlock()
+
 	info := Info{Current: u.Version, Channel: ChannelOf(u.Version), TargetChannel: target, CheckedAt: time.Now().Unix()}
 	fail := func(f string, a ...any) Info {
 		info.Reason = fmt.Sprintf(f, a...)
 		u.mu.Lock()
 		u.last = info
+		delete(u.checks, target)
 		u.mu.Unlock()
 		return info
 	}
@@ -277,7 +289,8 @@ func (u *Updater) CheckChannel(ctx context.Context, target string) Info {
 		info.Reason = "версия этой сборки (" + u.Version + ") не числовая — сравнить нельзя"
 	}
 	u.mu.Lock()
-	u.last, u.asset, u.sums = info, asset, sums
+	u.last = info
+	u.checks[target] = checkResult{info: info, asset: asset, sums: sums}
 	u.mu.Unlock()
 	return info
 }
@@ -298,18 +311,31 @@ func (u *Updater) finish(err error) {
 }
 
 // Apply скачивает и ставит последнюю проверенную версию (асинхронно).
+// Оставлен для внутренних вызовов, которым не нужно закреплять конкретный результат проверки.
 func (u *Updater) Apply() error {
+	return u.ApplyChecked("", "")
+}
+
+// ApplyChecked ставит конкретный результат проверки. target и latest передаются интерфейсом,
+// чтобы проверка другого канала не подменила выбранную для установки версию.
+func (u *Updater) ApplyChecked(target, latest string) error {
 	u.mu.Lock()
 	if u.job.Running {
 		u.mu.Unlock()
 		return errors.New("обновление уже идёт")
 	}
-	if !u.last.Available || !u.last.CanApply || u.asset == "" {
-		u.mu.Unlock()
-		return errors.New("нет доступного обновления: сначала нажмите «Проверить»")
+	if target == "" {
+		target = u.last.TargetChannel
 	}
-	asset, sums, ver := u.asset, u.sums, u.last.Latest
-	target := u.last.TargetChannel
+	check, ok := u.checks[target]
+	if latest == "" {
+		latest = check.info.Latest
+	}
+	if !ok || check.info.Latest != latest || !check.info.Available || !check.info.CanApply || check.asset == "" {
+		u.mu.Unlock()
+		return errors.New("результат проверки устарел или обновление недоступно: проверьте выбранный канал ещё раз")
+	}
+	asset, sums, ver := check.asset, check.sums, check.info.Latest
 	if target != ChannelRelease && target != ChannelDev || ChannelOf(ver) != target {
 		u.mu.Unlock()
 		return errors.New("результат проверки канала обновлений недействителен")
