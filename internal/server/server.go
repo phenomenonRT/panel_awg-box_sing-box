@@ -159,6 +159,7 @@ func (s *Server) Handler() http.Handler {
 	api("POST", "import/url", s.importURL, true)
 	api("POST", "keygen", s.keygen, true)
 	api("GET", "interfaces", s.interfaces, true)
+	api("POST", "interface/restart", s.restartInterface, true)
 	api("GET", "iface-check", s.ifaceCheck, true)
 	api("GET", "dns/system", s.dnsSystem, true)
 	api("POST", "dns/test", s.dnsTest, true)

@@ -1,4 +1,4 @@
-import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, num, pw, lines, csv, sel, chk, area, modal, confirmBox, toast, toastErr, help } from '../ui.js';
+import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, num, pw, lines, csv, sel, chk, area, modal, confirmBox, toast, toastErr, help, dur } from '../ui.js';
 import { get, post } from '../api.js';
 import * as st from '../state.js';
 import { loadAwgStates, awgBadge, delayClass } from '../awgstatus.js';
@@ -34,6 +34,7 @@ export default async function (root) {
   // Показываем задержку из проверок ядра (как чипы на обзоре): история группы обновляется фоновой
   // проверкой раз в интервал группы, а клик по значению проверяет узел прямо здесь и сразу.
   const delays = {}, delayErr = {}, hist = {}, busyPing = {};
+  const busyInterfaceRestart = new Set();
   const TEST_URL = 'https://www.gstatic.com/generate_204';
   let pingsAlive = true, pingT = 0;
   async function loadPings() {
@@ -83,6 +84,15 @@ export default async function (root) {
     return h('button', { type: 'button', class: 'chip ' + delayClass(d), disabled: !!busyPing[n.name], title,
       'aria-label': 'Проверить задержку узла ' + n.name, onclick: () => checkPing(n) }, h('small', lab));
   }
+  async function restartInterface(n) {
+    if (!(await confirmBox('Перезапустить интерфейс OpenWrt «' + n.bind_interface + '»? Подключение временно прервётся. Ядро amnezia-box останется запущенным. Совместимо с интерфейсами, которыми управляет OpenWrt. Это действие затронет все узлы, привязанные к этому интерфейсу.', 'Перезапустить', true))) return;
+    busyInterfaceRestart.add(n.bind_interface); drawTable();
+    try {
+      await post('api/interface/restart', { interface: n.bind_interface });
+      toast('Команда перезапуска интерфейса «' + n.bind_interface + '» отправлена в OpenWrt. Подключение может восстанавливаться несколько секунд; ядро не перезапускалось.', 'ok', 8000);
+    } catch (e) { toastErr(e); }
+    finally { busyInterfaceRestart.delete(n.bind_interface); drawTable(); }
+  }
 
   // Подпись под именем: тип, адрес и состояние туннеля одной строкой — так список умещается
   // и на телефоне (там он превращается в карточки, см. style.css).
@@ -104,6 +114,7 @@ export default async function (root) {
         h('td', h('div', { class: 'nb' }, n.name), h('div', { class: 'small mute' }, nodeMeta(n))),
         h('td', { class: 'nowrap' }, pingCell(n)),
         h('td', { class: 'act' },
+          n.type === 'iface' && S.system && S.system.platform && S.system.platform.os === 'openwrt' ? h('button', { class: 'btn sm', disabled: busyInterfaceRestart.has(n.bind_interface), title: 'Перезапустить интерфейс через OpenWrt netifd, не перезапуская ядро', 'aria-label': 'Перезапустить интерфейс ' + n.bind_interface, onclick: () => restartInterface(n) }, busyInterfaceRestart.has(n.bind_interface) ? 'Перезапуск…' : '↻ Интерфейс') : null, ' ',
           h('button', { class: 'btn sm', onclick: () => editNode(i) }, 'Изменить'), ' ',
           h('button', { class: 'btn sm', title: 'Дублировать', onclick: () => dup(i) }, '⧉'), ' ',
           h('button', { class: 'btn sm danger', 'aria-label': 'Удалить ' + n.name, onclick: () => del(i) }, '✕'))))))));
@@ -287,7 +298,21 @@ export default async function (root) {
   function drawVpn() {
     clear(vpnBox);
     const wg = s.nodes.filter((n) => n.type === 'wireguard' || n.type === 'awg');
-    vpnBox.append(h('div', { class: 'card' }, h('h2', 'VPN-интерфейсы (WireGuard)'),
+    vpnBox.append(
+      h('div', { class: 'card' }, h('h2', 'Автовосстановление туннелей'),
+        chk(s.recovery, 'enabled', 'Перезапускать ядро, если рукопожатия не проходят',
+          'Панель следит за журналом ядра: когда подряд накопится указанное ниже число неудачных рукопожатий, ядро перезапускается само. Обычно это лечит «зависший» туннель AmneziaWG, когда сервер перестал отвечать, а ядро продолжает работать.'),
+        chk(s.recovery, 'interface_restart_enabled', 'Перезапускать ядро, если пропал системный интерфейс',
+          'Панель проверяет, что системный VPN-интерфейс существует и поднят, с заданным ниже интервалом. Если он отсутствует или выключен в 5 проверках подряд, ядро перезапускается. Действует общий лимит перезапусков подряд.'),
+        note('', 'События рукопожатия ядро пишет только на уровне логов debug — включите его на странице «Входящие, TUN, сеть», карточка «Общие». От бесконечного цикла защищает лимит перезапусков подряд: после него панель показывает предупреждение в статусе, пока ядро не запустят вручную.'),
+        fgrid(
+          field('Неудачных рукопожатий подряд', num(s.recovery, 'fail_threshold', { min: 2, max: 100 }),
+            'Сколько подряд неудачных рукопожатий считать сбоем. Одна неудачная попытка — обычное дело, панель ждёт серию.'),
+          field('Интервал проверки интерфейса', dur(s.recovery, 'interface_check_interval_sec', [['сек', 1], ['мин', 60]], { min: 5, max: 600 }),
+            'Как часто проверять системный VPN-интерфейс. Допустимо от 5 секунд до 10 минут; после 5 неудачных проверок подряд ядро перезапускается.'),
+          field('Перезапусков подряд', num(s.recovery, 'max_restarts', { min: 1, max: 10 }),
+            'Сколько раз подряд перезапускать ядро, прежде чем сдаться. Счётчик сбрасывается при ручном запуске ядра и после долгой нормальной работы.'))),
+      h('div', { class: 'card' }, h('h2', 'VPN-интерфейсы (WireGuard)'),
       h('p', 'Узел WireGuard по умолчанию — обычный исходящий: трафик попадает в него только по правилам маршрутизации. Если включить «Системный интерфейс» (',
         h('code', 'system=true'), '), sing-box создаст настоящий сетевой интерфейс wg в ОС — его можно использовать в маршрутах роутера и других программах.'),
       note('warn', 'Системный интерфейс требует прав root.'),
