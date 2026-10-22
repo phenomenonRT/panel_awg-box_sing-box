@@ -23,6 +23,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"corepanel/internal/model"
 )
 
 // recoveryHealthyRun — сколько ядро должно проработать, чтобы прошлые автоперезапуски перестали
@@ -97,6 +99,36 @@ func (s *Supervisor) noteAwgLine(line string) {
 	s.recovering = true
 	attempt, max := s.recoverTries+1, set.Recovery.MaxRestarts
 	s.Logs.Add(fmt.Sprintf("[panel] узел %s: %d подряд неудачных рукопожатий — перезапускаю ядро (автовосстановление, попытка %d/%d)", tag, fails, attempt, max))
+	s.mu.Unlock()
+	go s.autoRestart(attempt)
+}
+
+func (s *Supervisor) noteMissingInterface(set *model.Settings, node, iface string) {
+	s.mu.Lock()
+	if s.ifaceFails == nil {
+		s.ifaceFails = map[string]int{}
+	}
+	s.ifaceFails[iface]++
+	fails := s.ifaceFails[iface]
+	if s.recovering || !s.desired || !s.running() || fails < 5 {
+		s.mu.Unlock()
+		return
+	}
+	if time.Since(s.startedAt) > recoveryHealthyRun {
+		s.recoverTries, s.recoverNote = 0, ""
+	}
+	if s.recoverTries >= set.Recovery.MaxRestarts {
+		if s.recoverNote == "" {
+			s.recoverNote = fmt.Sprintf("Автовосстановление остановлено: %d перезапусков подряд не помогли — проверьте системный интерфейс %s.", s.recoverTries, iface)
+			s.Logs.Add("[panel] " + s.recoverNote)
+		}
+		s.mu.Unlock()
+		return
+	}
+	s.recovering = true
+	attempt, max := s.recoverTries+1, set.Recovery.MaxRestarts
+	s.ifaceFails[iface] = 0
+	s.Logs.Add(fmt.Sprintf("[panel] узел %s: интерфейс %s отсутствует или не поднят в 5 проверках подряд — перезапускаю ядро (попытка %d/%d)", node, iface, attempt, max))
 	s.mu.Unlock()
 	go s.autoRestart(attempt)
 }

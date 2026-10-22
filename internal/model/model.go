@@ -231,10 +231,13 @@ const (
 // Допустимые значения автовосстановления: порог серии неудачных рукопожатий и число перезапусков
 // подряд (защита от бесконечного цикла перезапусков).
 const (
-	RecoveryFailsMin    = 2
-	RecoveryFailsMax    = 100
-	RecoveryRestartsMin = 1
-	RecoveryRestartsMax = 10
+	RecoveryFailsMin                = 2
+	RecoveryFailsMax                = 100
+	RecoveryRestartsMin             = 1
+	RecoveryRestartsMax             = 10
+	RecoveryIfaceIntervalMinSec     = 5
+	RecoveryIfaceIntervalMaxSec     = 600
+	RecoveryIfaceIntervalDefaultSec = 15
 )
 
 // RuleSet — удалённый набор правил.
@@ -277,9 +280,11 @@ type Update struct {
 // перестал отвечать, ядро продолжает работать с «мёртвым» туннелем, и панель перезапускает его.
 // События рукопожатия ядро пишет на уровне логов debug.
 type Recovery struct {
-	Enabled       bool `json:"enabled"`        // следить за рукопожатиями и перезапускать ядро
-	FailThreshold int  `json:"fail_threshold"` // сколько подряд неудачных рукопожатий считать сбоем
-	MaxRestarts   int  `json:"max_restarts"`   // сколько перезапусков подряд делать, прежде чем сдаться
+	Enabled                   bool `json:"enabled"`                      // следить за рукопожатиями и перезапускать ядро
+	FailThreshold             int  `json:"fail_threshold"`               // сколько подряд неудачных рукопожатий считать сбоем
+	MaxRestarts               int  `json:"max_restarts"`                 // сколько перезапусков подряд делать, прежде чем сдаться
+	InterfaceRestartEnabled   bool `json:"interface_restart_enabled"`    // перезапускать ядро, если системный интерфейс пропал
+	InterfaceCheckIntervalSec int  `json:"interface_check_interval_sec"` // интервал проверки системного интерфейса, секунды
 }
 
 type Download struct {
@@ -307,7 +312,7 @@ func Default() *Settings {
 			Remote: "https://1.1.1.1/dns-query", Local: "77.88.8.8", Bootstrap: "77.88.8.8",
 			FakeIPRange: "198.18.0.0/15", Final: "remote"},
 		Final:    "direct",
-		Recovery: Recovery{FailThreshold: 5, MaxRestarts: 3},
+		Recovery: Recovery{FailThreshold: 5, MaxRestarts: 3, InterfaceCheckIntervalSec: RecoveryIfaceIntervalDefaultSec},
 		Firewall: Firewall{Mode: "off", Backend: "auto", FwMark: 1, RouteTable: 100,
 			LANIfaces: []string{}, Include: []string{}, Exclude: []string{}, BypassDst: []string{}},
 		Nodes: []Node{}, Groups: []Group{}, RuleSets: []RuleSet{}, Rules: []Rule{},
@@ -396,6 +401,15 @@ func (s *Settings) Normalize() {
 		s.Recovery.MaxRestarts = RecoveryRestartsMin
 	case s.Recovery.MaxRestarts > RecoveryRestartsMax:
 		s.Recovery.MaxRestarts = RecoveryRestartsMax
+	}
+	if s.Recovery.InterfaceCheckIntervalSec == 0 {
+		s.Recovery.InterfaceCheckIntervalSec = d.Recovery.InterfaceCheckIntervalSec
+	}
+	switch {
+	case s.Recovery.InterfaceCheckIntervalSec < RecoveryIfaceIntervalMinSec:
+		s.Recovery.InterfaceCheckIntervalSec = RecoveryIfaceIntervalMinSec
+	case s.Recovery.InterfaceCheckIntervalSec > RecoveryIfaceIntervalMaxSec:
+		s.Recovery.InterfaceCheckIntervalSec = RecoveryIfaceIntervalMaxSec
 	}
 	if s.Firewall.Mode == "" {
 		s.Firewall.Mode = "off"

@@ -125,6 +125,7 @@ type Supervisor struct {
 	recoverTries int            // сколько автоперезапусков подряд уже сделано
 	recoverNote  string         // предупреждение автовосстановления (показывается в статусе)
 	awgFails     map[string]int // неудачные рукопожатия подряд по узлам endpoint/awg[...]
+	ifaceFails   map[string]int // последовательные проверки отсутствующих системных интерфейсов
 }
 
 // New создаёт супервизор. getSettings вызывается при автоперезапуске.
@@ -414,6 +415,69 @@ func (s *Supervisor) startRouteWatchesLocked(set *model.Settings, done <-chan st
 		s.ifw = sc
 		if s.watchRoutesLocked(sc, done, "маршруты устройств в свои интерфейсы") == nil {
 			s.Logs.Add("[panel] устройства направлены в свои интерфейсы")
+		}
+	}
+	go s.watchInterfaceRecovery(done)
+}
+
+// watchInterfaceRecovery перезапускает ядро, если системный интерфейс узла отсутствует или выключен
+// пять проверок подряд. Сам интерфейс обслуживается системой или сетевой службой, не ядром.
+func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
+	// Проверяем настройки раз в секунду, чтобы изменение интервала применялось без перезапуска панели.
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	var checkInterval time.Duration
+	var nextCheck time.Time
+	for {
+		select {
+		case <-done:
+			return
+		case <-t.C:
+			set := s.getSet()
+			if set == nil || !set.Recovery.InterfaceRestartEnabled {
+				s.mu.Lock()
+				s.ifaceFails = nil
+				s.mu.Unlock()
+				checkInterval = 0
+				nextCheck = time.Time{}
+				continue
+			}
+			configuredInterval := time.Duration(set.Recovery.InterfaceCheckIntervalSec) * time.Second
+			now := time.Now()
+			if configuredInterval != checkInterval {
+				checkInterval = configuredInterval
+				nextCheck = now.Add(checkInterval)
+				continue
+			}
+			if now.Before(nextCheck) {
+				continue
+			}
+			nextCheck = now.Add(checkInterval)
+			checks := firewall.CheckNodeIfaceLinks(set)
+			seen := make(map[string]bool, len(checks))
+			for _, check := range checks {
+				if seen[check.Iface] {
+					continue // один интерфейс может использоваться несколькими узлами; считаем проверку один раз
+				}
+				seen[check.Iface] = true
+				if check.Active {
+					s.mu.Lock()
+					if s.ifaceFails == nil {
+						s.ifaceFails = map[string]int{}
+					}
+					s.ifaceFails[check.Iface] = 0
+					s.mu.Unlock()
+					continue
+				}
+				s.noteMissingInterface(set, check.Node, check.Iface)
+			}
+			s.mu.Lock()
+			for iface := range s.ifaceFails {
+				if !seen[iface] { // удалённый из настроек интерфейс больше не должен влиять на счётчик
+					delete(s.ifaceFails, iface)
+				}
+			}
+			s.mu.Unlock()
 		}
 	}
 }

@@ -509,6 +509,30 @@ type NodeIfaceCheck struct {
 	Out   string `json:"out,omitempty"`  // что ответила система, если правила или маршрута не хватает
 }
 
+// NodeIfaceLink reports whether a configured system VPN interface is currently up.
+type NodeIfaceLink struct {
+	Node   string `json:"node"`
+	Iface  string `json:"iface"`
+	Active bool   `json:"active"`
+}
+
+// CheckNodeIfaceLinks checks whether enabled system-interface nodes are up.
+func CheckNodeIfaceLinks(s *model.Settings) []NodeIfaceLink {
+	if s == nil {
+		return nil
+	}
+	var out []NodeIfaceLink
+	for _, nd := range s.Nodes {
+		if nd.Type != "iface" || s.IfaceNodeSlot(nd.Name) < 0 || !ifaceRe.MatchString(nd.BindInterface) {
+			continue
+		}
+		iface, err := net.InterfaceByName(nd.BindInterface)
+		active := err == nil && iface.Flags&net.FlagUp != 0
+		out = append(out, NodeIfaceLink{Node: nd.Name, Iface: nd.BindInterface, Active: active})
+	}
+	return out
+}
+
 // CheckNodeIfaceRoutes проверяет, что маршруты узлов-интерфейсов действительно стоят в системе.
 func CheckNodeIfaceRoutes(s *model.Settings) []NodeIfaceCheck {
 	out := []NodeIfaceCheck{}
