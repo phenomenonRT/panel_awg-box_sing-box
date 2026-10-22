@@ -5,6 +5,7 @@ package rulesets
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -215,13 +216,30 @@ func Prepare(ctx context.Context, dir string, sets []model.RuleSet, fetch Fetche
 		if n == 0 {
 			warns = append(warns, fmt.Sprintf("набор «%s»: в списке %s не нашлось ни одного домена или подсети", rs.Name, rs.URL))
 		}
-		tmp := file + ".tmp"
-		if err := os.WriteFile(tmp, js, 0o600); err == nil {
-			err = os.Rename(tmp, file)
-			if err == nil {
-				_ = os.WriteFile(stamp, []byte(rs.URL), 0o600)
+		old, readErr := os.ReadFile(file)
+		if readErr != nil || !bytes.Equal(old, js) {
+			tmp := file + ".tmp"
+			if err := os.WriteFile(tmp, js, 0o600); err == nil {
+				if err = os.Rename(tmp, file); err != nil {
+					_ = os.Remove(tmp)
+					continue
+				}
+			} else {
+				continue
 			}
 		}
+		// Файл набора перезаписываем только при изменении содержимого. Метку
+		// обновляем и при совпадении, чтобы не скачивать тот же список при каждом запуске.
+		markFetched(stamp, rs.URL)
 	}
 	return warns
+}
+
+func markFetched(stamp, sourceURL string) {
+	if old, err := os.ReadFile(stamp); err == nil && string(old) == sourceURL {
+		now := time.Now()
+		_ = os.Chtimes(stamp, now, now)
+		return
+	}
+	_ = os.WriteFile(stamp, []byte(sourceURL), 0o600)
 }

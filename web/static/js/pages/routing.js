@@ -86,7 +86,20 @@ export default async function (root) {
     });
   }
 
-  const presetSel = { v: '0', out: '' };
+  const presetSel = { out: '' };
+  const selectedPresets = new Set();
+  const presetSummary = h('summary', { class: 'btn', 'aria-label': 'Выбрать шаблоны наборов правил' }, 'Выбрать шаблоны');
+  const presetPicker = h('details', { class: 'rs-picker' }, presetSummary,
+    h('div', { class: 'rs-preset-menu' }, PRESETS.map((p, i) => h('label', { class: 'check rs-preset-option' },
+      h('input', { type: 'checkbox', onchange: (e) => {
+        if (e.target.checked) selectedPresets.add(i); else selectedPresets.delete(i);
+        updatePresetSummary();
+      } }), p[0]))));
+  function updatePresetSummary() {
+    const label = selectedPresets.size ? 'Выбрано шаблонов: ' + selectedPresets.size : 'Выбрать шаблоны';
+    presetSummary.textContent = label;
+    presetSummary.setAttribute('aria-label', label);
+  }
   const g = s.general;
   apd(root, pageHead('Маршрутизация', 'Правила применяются сверху вниз: побеждает первое подходящее'), transparentNote(),
     h('div', { class: 'card' }, h('h2', 'Общее'),
@@ -105,16 +118,31 @@ export default async function (root) {
     h('div', { class: 'card' }, h('h2', 'Наборы правил'),
       h('p', { class: 'small mute' }, 'Набор — это готовый список доменов или подсетей (Telegram, YouTube, реклама…). Выберите набор и то, куда направлять его трафик: правило создастся само и появится в списке «Правила» выше. Ссылки на списки (.srs) подставляются автоматически.'),
       h('div', { class: 'row', style: 'margin-bottom:10px;flex-wrap:wrap;gap:8px' },
-        h('select', { 'aria-label': 'Шаблон набора', style: 'width:auto', onchange: (e) => { presetSel.v = e.target.value; } }, PRESETS.map((p, i) => h('option', { value: i }, p[0]))),
+        presetPicker,
         h('span', { class: 'small mute' }, '→'),
         h('select', { 'aria-label': 'Куда направить', style: 'width:auto', onchange: (e) => { presetSel.out = e.target.value; } },
           outs().filter((o) => o[0] !== undefined).map(([v, t]) => h('option', { value: v, selected: v === proxyOut() }, t))),
         h('button', { class: 'btn primary', onclick: () => {
-          const p = PRESETS[+presetSel.v || 0]; const isList = p[1] === 'list'; const name = isList ? p[2] : p[1] + '-' + p[2];
-          if (s.rule_sets.some((r) => r.name === name)) { toast('Набор «' + name + '» уже есть', 'err'); return; }
+          if (!selectedPresets.size) { toast('Выберите один или несколько шаблонов', 'err'); return; }
           const out = presetSel.out || proxyOut();
-          s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: 86400 } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: 86400 });
-          setRule(name, out); drawSets(); toast('Добавлен набор «' + p[0] + '» → ' + out, 'ok');
+          let added = 0, skipped = 0;
+          for (const i of selectedPresets) {
+            const p = PRESETS[i]; const isList = p[1] === 'list'; const name = isList ? p[2] : p[1] + '-' + p[2];
+            if (s.rule_sets.some((r) => r.name === name)) { skipped++; continue; }
+            s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: 86400 } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: 86400 });
+            const existing = ruleOf(name);
+            if (existing) existing.outbound = out;
+            else s.rules.push({ type: 'rule_set', values: [name], outbound: out });
+            added++;
+          }
+          selectedPresets.clear();
+          for (const checkbox of presetPicker.querySelectorAll('input[type=checkbox]')) checkbox.checked = false;
+          updatePresetSummary();
+          presetPicker.open = false;
+          if (added) { st.touch(); ed.redraw(); drawSets(); }
+          if (added && skipped) toast('Добавлено наборов: ' + added + ', уже были: ' + skipped, 'ok');
+          else if (added) toast('Добавлено наборов: ' + added + ' → ' + out, 'ok');
+          else toast('Выбранные наборы уже добавлены', 'err');
         } }, 'Добавить'),
         h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: 86400 }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
       setsBox));
