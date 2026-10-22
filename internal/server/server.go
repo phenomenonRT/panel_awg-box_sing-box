@@ -172,6 +172,22 @@ func (s *Server) Handler() http.Handler {
 		s.Updater.Check(ctx)
 		ok(w, s.Updater.State())
 	}, true)
+	api("POST", "update/channel", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Channel string `json:"channel"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.Channel != updater.ChannelRelease && in.Channel != updater.ChannelDev {
+			fail(w, 400, "неизвестный канал обновлений")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		s.Updater.CheckChannel(ctx, in.Channel)
+		ok(w, s.Updater.State())
+	}, true)
 	api("POST", "update/apply", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.Updater.Apply(); err != nil {
 			fail(w, 409, err.Error())

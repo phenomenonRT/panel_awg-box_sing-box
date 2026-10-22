@@ -197,7 +197,7 @@ func (s *Supervisor) Adopt(set *model.Settings) bool {
 	go tl.run()
 	done := s.done
 	if set != nil {
-		go s.refreshRuleSets(set, s.RuntimeDir(st.Core), done)
+		go s.refreshRuleSets(set, s.RuntimeDir(st.Core), s.ruleSetsRAMDir(set, st.Core), done)
 		// Маршруты прежний процесс панели обновлял сам; его тикер умер вместе с ним, а правила могли
 		// устареть (интерфейс пересоздавался, пока панель обновлялась). Возвращаем слежение обоим наборам.
 		s.startRouteWatchesLocked(set, done)

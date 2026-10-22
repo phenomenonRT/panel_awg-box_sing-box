@@ -33,30 +33,59 @@ export default async function (root) {
   };
   // ---- обновление панели ----
   const updBox = h('div', { class: 'card' });
-  let alive = true, updT = 0, applying = false;
+  let alive = true, updT = 0, applying = false, switching = false;
   const fmtTime = (t) => (t ? new Date(t * 1000).toLocaleString('ru-RU') : 'ещё не проверялось');
+  async function switchChannel(target) {
+    switching = true;
+    drawUpd(S.update || {});
+    try {
+      const checked = await post('api/update/channel', { channel: target });
+      if (!alive) return;
+      drawUpd(checked);
+      if (!checked.available || !checked.can_apply) {
+        if (!checked.reason) toast('В выбранном канале нет версии для установки', '');
+        return;
+      }
+      const targetName = target === 'dev' ? 'dev-версию' : 'стабильную версию';
+      if (!(await confirmBox('Перейти на ' + targetName + ' v' + checked.latest + '? Панель установит версию и перезапустится.', 'Перейти'))) return;
+      applying = true;
+      drawUpd(checked);
+      drawUpd(await post('api/update/apply'));
+      watch(checked.current);
+    } catch (x) {
+      applying = false;
+      toastErr(x);
+    } finally {
+      switching = false;
+      if (alive) drawUpd(S.update || {});
+    }
+  }
   function drawUpd(u) {
     S.update = u;
     clear(updBox);
     const j = u.job || {};
-    const busy = !!j.running || applying;
+    const busy = !!j.running || applying || switching;
     apd(updBox, h('h2', 'Обновление'),
       h('dl', { class: 'kv' }, h('dt', 'Установлена'), h('dd', 'v' + String(u.current || '—').replace(/^v/, '')),
         h('dt', 'Канал'), h('dd', u.channel === 'dev' ? h('span', { class: 'badge warn' }, 'dev — предварительные релизы') : 'стабильные релизы'),
         h('dt', 'Последняя версия'), h('dd', u.latest ? 'v' + u.latest : '—'),
         h('dt', 'Проверено'), h('dd', fmtTime(u.checked_at))),
       u.available ? note('ok', 'Доступна новая версия v' + u.latest + '.') : (u.latest ? note('', 'Установлена последняя версия.') : null),
-      u.channel === 'dev' ? note('warn', 'Это dev-сборка: она получает только предварительные релизы и может работать нестабильно. Чтобы перейти на стабильную версию, установите обычный релиз вручную (пакетом или файлом).') : null,
+      u.target_channel && u.target_channel !== u.channel ? note('', 'Проверен канал: ' + (u.target_channel === 'dev' ? 'dev' : 'стабильные релизы') + '.') : null,
       u.reason ? note(u.available ? 'warn' : 'err', u.reason) : null,
       j.error ? note('err', j.error) : null,
       h('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px;margin:10px 0' },
         h('button', { class: 'btn', disabled: busy, onclick: async () => {
           try { drawUpd(await post('api/update/check')); } catch (x) { toastErr(x); }
         } }, 'Проверить обновления'),
+        h('button', { class: 'btn', disabled: busy, onclick: () => switchChannel(u.channel === 'dev' ? 'release' : 'dev') },
+          u.channel === 'dev' ? 'Перейти на стабильную версию' : 'Перейти на dev'),
         u.available && u.can_apply ? h('button', { class: 'btn primary', disabled: busy, onclick: async () => {
-          if (!(await confirmBox('Обновить панель до v' + u.latest + '? Ядро будет остановлено и запущено снова, страница перезагрузится.', 'Обновить'))) return;
+          const switchingBuild = u.target_channel && u.target_channel !== u.channel;
+          const targetName = u.target_channel === 'dev' ? 'dev-версию' : 'стабильную версию';
+          if (!(await confirmBox((switchingBuild ? 'Перейти на ' + targetName : 'Обновить панель') + ' v' + u.latest + '? Панель установит версию и перезапустится.', switchingBuild ? 'Перейти' : 'Обновить'))) return;
           try { applying = true; drawUpd(await post('api/update/apply')); watch(u.current); } catch (x) { applying = false; toastErr(x); }
-        } }, 'Обновить до v' + u.latest) : null,
+        } }, u.target_channel && u.target_channel !== u.channel ? 'Установить ' + (u.target_channel === 'dev' ? 'dev-' : 'стабильную ') + 'версию v' + u.latest : 'Обновить до v' + u.latest) : null,
         u.page_url ? h('a', { class: 'btn ghost', href: u.page_url, target: '_blank', rel: 'noopener noreferrer' }, 'Что нового') : null),
       chk(S.settings.update, 'auto', 'Автообновление', 'Раз в несколько часов панель проверяет релизы на GitHub и сама ставит новую версию (ядро при этом ненадолго перезапускается). По умолчанию выключено. Сохраните настройки, чтобы изменение вступило в силу.'),
       (j.running || (j.output && j.output.length)) ? h('pre', { class: 'mono', style: 'max-height:200px;overflow:auto;white-space:pre-wrap;margin-top:10px' }, (j.output || []).join('\n')) : null);

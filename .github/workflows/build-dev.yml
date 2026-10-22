@@ -33,7 +33,7 @@ jobs:
             # основа — следующий патч после последнего обычного релиза (или после версии из build.yml);
             # номер dev — следующий после уже выпущенных dev с той же основой
             last=$(gh release list --limit 100 --json tagName,isPrerelease,createdAt \
-              --jq '[.[] | select(.isPrerelease == true)] | sort_by(.createdAt) | reverse | .[0].tagName // ""' | sed 's/^v//')
+              --jq '[.[] | select(.isPrerelease == false)] | sort_by(.createdAt) | reverse | .[0].tagName // ""' | sed 's/^v//')
             [ -n "$last" ] || last=$(grep -m1 -Eo 'default: "[0-9.]+"' .github/workflows/build.yml | grep -Eo '[0-9.]+')
             base=$(printf %s "$last" | awk -F. -v OFS=. '{$NF=$NF+1; print}')
             n=$(gh release list --limit 100 --json tagName --jq '.[].tagName' \

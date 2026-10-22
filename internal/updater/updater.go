@@ -53,14 +53,15 @@ const ResumeMarker = "resume-core"
 
 // Info — результат проверки.
 type Info struct {
-	Current   string `json:"current"`
-	Channel   string `json:"channel"` // release | dev
-	Latest    string `json:"latest,omitempty"`
-	Available bool   `json:"available"`
-	PageURL   string `json:"page_url,omitempty"`
-	CheckedAt int64  `json:"checked_at,omitempty"`
-	CanApply  bool   `json:"can_apply"`
-	Reason    string `json:"reason,omitempty"` // почему обновить нельзя / проверка не удалась
+	Current       string `json:"current"`
+	Channel       string `json:"channel"`                  // release | dev
+	TargetChannel string `json:"target_channel,omitempty"` // канал, выбранный для последней проверки
+	Latest        string `json:"latest,omitempty"`
+	Available     bool   `json:"available"`
+	PageURL       string `json:"page_url,omitempty"`
+	CheckedAt     int64  `json:"checked_at,omitempty"`
+	CanApply      bool   `json:"can_apply"`
+	Reason        string `json:"reason,omitempty"` // почему обновить нельзя / проверка не удалась
 }
 
 // Job — состояние установки.
@@ -177,13 +178,22 @@ func (u *Updater) State() State {
 
 // Check запрашивает последний релиз.
 func (u *Updater) Check(ctx context.Context) Info {
-	info := Info{Current: u.Version, Channel: ChannelOf(u.Version), CheckedAt: time.Now().Unix()}
+	return u.CheckChannel(ctx, ChannelOf(u.Version))
+}
+
+// CheckChannel проверяет последний релиз выбранного канала. Другой канал разрешён только
+// для явного переключения пользователем; Apply сохраняет выбранный канал в last.
+func (u *Updater) CheckChannel(ctx context.Context, target string) Info {
+	info := Info{Current: u.Version, Channel: ChannelOf(u.Version), TargetChannel: target, CheckedAt: time.Now().Unix()}
 	fail := func(f string, a ...any) Info {
 		info.Reason = fmt.Sprintf(f, a...)
 		u.mu.Lock()
 		u.last = info
 		u.mu.Unlock()
 		return info
+	}
+	if target != ChannelRelease && target != ChannelDev {
+		return fail("неизвестный канал обновлений")
 	}
 	cl, err := u.client()
 	if err != nil {
@@ -215,7 +225,7 @@ func (u *Updater) Check(ctx context.Context) Info {
 	}
 	// Берём самый новый релиз своего канала: dev-сборка — только предварительные (тег с «-dev»),
 	// обычная — только не предварительные и без «-dev» в теге.
-	ch := info.Channel
+	ch := target
 	var rel *relT
 	for i := range list {
 		r := &list[i]
@@ -237,7 +247,12 @@ func (u *Updater) Check(ctx context.Context) Info {
 	}
 	info.Latest = strings.TrimPrefix(rel.Tag, "v")
 	info.PageURL = rel.URL
-	info.Available = Newer(rel.Tag, u.Version)
+	if target == info.Channel {
+		info.Available = Newer(rel.Tag, u.Version)
+	} else {
+		// При явном переключении на другой канал допускается и более старая версия.
+		info.Available = strings.TrimPrefix(rel.Tag, "v") != strings.TrimPrefix(u.Version, "v")
+	}
 	var asset, sums string
 	want := "corepanel-linux-" + u.Info.Arch
 	for _, a := range rel.Assets {
@@ -294,9 +309,10 @@ func (u *Updater) Apply() error {
 		return errors.New("нет доступного обновления: сначала нажмите «Проверить»")
 	}
 	asset, sums, ver := u.asset, u.sums, u.last.Latest
-	if ChannelOf(ver) != ChannelOf(u.Version) {
+	target := u.last.TargetChannel
+	if target != ChannelRelease && target != ChannelDev || ChannelOf(ver) != target {
 		u.mu.Unlock()
-		return errors.New("версия другого канала (dev и обычные сборки не смешиваются)")
+		return errors.New("результат проверки канала обновлений недействителен")
 	}
 	u.job = Job{Running: true}
 	u.mu.Unlock()

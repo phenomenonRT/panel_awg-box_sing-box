@@ -6,6 +6,37 @@ import { transparentNote } from '../transparent.js';
 const S = st.S;
 const SB = 'https://raw.githubusercontent.com/SagerNet/';
 const ID = 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/';
+const MCT = 'https://raw.githubusercontent.com/avgustvishne/CDN-Cloud-MagiTrickle/main/data/';
+const ASN = 'https://asn.web2core.workers.dev/';
+const MCT_PROFILES = [
+  ['FULL', 'full', 'presets/full'], ['BALANCED', 'balanced', 'presets/balanced'],
+  ['PERFORMANCE', 'performance', 'presets/performance'], ['MINIMAL', 'minimal', 'presets/minimal'],
+  ['CDN', 'cdn', 'presets/cdn'], ['CLOUD', 'cloud', 'presets/cloud'],
+  ['VIDEO', 'video', 'presets/video'], ['VPN', 'vpn', 'presets/vpn'],
+  ['ASN ALL', 'asn-all', 'asn-all'], ['STABLE', 'stable', 'presets/stable'],
+];
+const ASN_PRESETS = [
+  ['AWS IPv4', 'aws-v4', 'AS16509,AS14618?v4'], ['AWS IPv6', 'aws-v6', 'AS16509,AS14618?v6'],
+  ['Fastly CDN IPv4', 'fastly-v4', 'AS54113?v4'],
+  ['Melbicom IPv4 (AS56630)', 'melbicom-as56630-v4', 'AS56630?v4'],
+  ['Melbicom IPv4 (AS8849)', 'melbicom-as8849-v4', 'AS8849?v4'],
+  ['Melbicom IPv6 (AS56630)', 'melbicom-as56630-v6', 'AS56630?v6'],
+  ['FT/BuyVM IPv4', 'buyvm-v4', 'AS53667?v4'], ['FT/BuyVM IPv6', 'buyvm-v6', 'AS53667?v6'],
+  ['Vultr IPv4', 'vultr-v4', 'AS20473?v4'], ['Vultr IPv6', 'vultr-v6', 'AS20473?v6'],
+  ['Contabo IPv4', 'contabo-v4', 'AS51167?v4'], ['Contabo IPv6', 'contabo-v6', 'AS51167?v6'],
+  ['Akamai IPv4', 'akamai-v4', 'AS20940?v4'], ['Akamai IPv6', 'akamai-v6', 'AS20940?v6'],
+  ['Scaleway IPv4', 'scaleway-v4', 'AS12876?v4'], ['Scaleway IPv6', 'scaleway-v6', 'AS12876?v6'],
+  ['Cloudflare by ASN IPv4', 'cloudflare-asn-v4', 'AS13335,AS14789,AS132892,AS133877,AS139242,AS202623,AS203898,AS209242,AS394536,AS395747,AS400095?v4'],
+  ['Hetzner by ASN IPv4', 'hetzner-asn-v4', 'AS24940,AS213230,AS212317,AS215859?v4'],
+  ['OVH by ASN IPv4', 'ovh-asn-v4', 'AS16276,AS35540,AS199949?v4'],
+  ['Akamai by ASN (Linode, Apple Private Relay, Prolexic) IPv4', 'akamai-asn-v4', 'AS16625,AS20940,AS12222,AS18680,AS18717,AS22207,AS23903,AS32787,AS35994,AS36183,AS63949?v4'],
+  ['DigitalOcean by ASN IPv4', 'digitalocean-asn-v4', 'AS14061,AS133165,AS394362,AS393406,AS135340,AS201229,AS202018,AS202109?v4'],
+  ['Microsoft Azure by ASN IPv4', 'microsoft-azure-asn-v4', 'AS8075,AS12076,AS54489,AS3598,AS6584,AS8068?v4'],
+  ['Edgio by ASN IPv4', 'edgio-asn-v4', 'AS15133,AS22822?v4'],
+  ['Oracle Cloud by ASN IPv4', 'oracle-cloud-asn-v4', 'AS31898,AS23871,AS39648?v4'],
+  ['Alibaba Cloud by ASN IPv4', 'alibaba-cloud-asn-v4', 'AS37963,AS45102,AS24429,AS45090?v4'],
+  ['CDN77 by ASN IPv4', 'cdn77-asn-v4', 'AS60068?v4'],
+];
 // [подпись, тип, имя]
 const PRESETS = [
   ['Реклама', 'geosite', 'category-ads-all'], ['Россия (домены)', 'geosite', 'category-ru'], ['Россия (IP)', 'geoip', 'ru'],
@@ -29,6 +60,11 @@ const PRESETS = [
   ['itdoginfo: Подсети Meta', 'list', 'itdog-ip-meta', ID + 'Subnets/IPv4/meta.lst'],
   ['itdoginfo: Подсети Telegram', 'list', 'itdog-ip-telegram', ID + 'Subnets/IPv4/telegram.lst'],
   ['itdoginfo: Подсети Twitter / X', 'list', 'itdog-ip-twitter', ID + 'Subnets/IPv4/twitter.lst'],
+  ...MCT_PROFILES.flatMap(([label, slug, path]) => [
+    [`MagiTrickle: ${label} IPv4`, 'list', `magitrickle-${slug}-ipv4`, `${MCT}${path}-v4.txt`],
+    [`MagiTrickle: ${label} IPv6`, 'list', `magitrickle-${slug}-ipv6`, `${MCT}${path}-v6.txt`],
+  ]),
+  ...ASN_PRESETS.map(([label, slug, path]) => [`ASN: ${label}`, 'list', `asn-${slug}`, `${ASN}${path}`]),
 ];
 function presetURL(core, kind, name) {
   return SB + (kind === 'geosite' ? 'sing-geosite/rule-set/geosite-' : 'sing-geoip/rule-set/geoip-') + name + '.srs';
@@ -68,6 +104,8 @@ export default async function (root) {
       let prev = r.name;
       const cur = ruleOf(r.name);
       const more = usedElsewhere(r.name);
+      const addedAt = Number(r.added_at);
+      const addedDate = Number.isFinite(addedAt) && addedAt > 0 ? new Date(addedAt).toLocaleDateString() : '';
       const outSel = h('select', { 'aria-label': 'Куда направить трафик набора ' + r.name, onchange: (e) => { if (!r.name) { toast('Сначала укажите имя набора', 'err'); e.target.value = ''; return; } setRule(r.name, e.target.value); drawSets(); } },
         dest().map(([v, t]) => h('option', { value: v, selected: v === (cur ? cur.outbound : '') }, t)));
       const status = cur ? h('span', { class: 'badge ok' }, 'направляется → ' + cur.outbound)
@@ -75,7 +113,7 @@ export default async function (root) {
           : h('span', { class: 'badge warn' }, 'не используется — трафик не направляется');
       setsBox.append(h('div', { class: 'rule' },
         h('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:8px' },
-          h('b', r.name || 'новый набор'), status, h('span', { class: 'grow' }),
+          h('b', r.name || 'новый набор'), addedDate ? h('span', { class: 'small mute' }, 'добавлен ' + addedDate) : null, status, h('span', { class: 'grow' }),
           h('button', { class: 'btn sm danger', onclick: () => { const old = ruleOf(r.name); if (old) s.rules.splice(s.rules.indexOf(old), 1); s.rule_sets.splice(i, 1); st.touch(); ed.redraw(); drawSets(); } }, 'Удалить')),
         fgrid(field('Куда направить трафик', outSel, 'Создаёт правило «этот набор → выбранный выход». Правила работают сверху вниз: новое добавляется в конец списка правил, а всё, что не подошло, уходит в «Final».'),
           field('Адрес списка (URL)', txt(r, 'url', { ph: 'https://…/set.srs' }), 'Файл .srs или .json — ядро скачивает и обновляет его само. Обычный список (.lst, .txt: домен в строке, можно подсети) панель скачивает и преобразует сама.')),
@@ -105,6 +143,7 @@ export default async function (root) {
     h('div', { class: 'card' }, h('h2', 'Общее'),
       fgrid(field('Final — исходящий по умолчанию', sel(s, 'final', outs()), 'Куда отправлять трафик, не попавший ни под одно правило.'),
         field('Скачивать наборы правил через', sel(g, 'update_via', [['direct', 'direct — напрямую'], ...outs().filter((o) => o[0] !== 'direct' && o[0] !== 'block')]), 'Если GitHub заблокирован, укажите здесь рабочий узел или группу.')),
+      chk(g, 'rule_sets_ram', 'Хранить обновления текстовых наборов в RAM', 'Первый успешный список для каждой ссылки сохраняется в постоянный каталог. Рабочая копия для amnezia-box находится в /tmp (RAM); последующие изменившиеся версии той же ссылки записываются туда, флеш-копия не перезаписывается. После перезагрузки панель восстановит копию и сразу проверит источник; без сети останется сохранённая первоначальная версия. Расход RAM примерно равен суммарному размеру активных текстовых наборов.'),
       chk(g, 'bypass_lan', 'Локальные сети — напрямую (bypass LAN)', 'Добавляет правило «частные адреса → direct» перед остальными, чтобы доступ к роутеру и устройствам дома не уходил в прокси.'),
       chk(g, 'sniff', 'Определять домен и протокол (sniff)', 'Ядро подсматривает SNI/Host в первых пакетах. Нужно для доменных правил при прозрачном прокси и для правил по протоколу.')),
     h('div', { class: 'card' }, h('h2', 'Правила'),
@@ -117,6 +156,8 @@ export default async function (root) {
       ed.el),
     h('div', { class: 'card' }, h('h2', 'Наборы правил'),
       h('p', { class: 'small mute' }, 'Набор — это готовый список доменов или подсетей (Telegram, YouTube, реклама…). Выберите набор и то, куда направлять его трафик: правило создастся само и появится в списке «Правила» выше. Ссылки на списки (.srs) подставляются автоматически.'),
+      h('p', { class: 'small mute' }, 'Добавлены профили IPv4/IPv6 от ', h('a', { href: 'https://github.com/avgustvishne/CDN-Cloud-MagiTrickle', target: '_blank', rel: 'noopener noreferrer' }, 'CDN-Cloud-MagiTrickle'), '. Их списки обновляются по ссылкам источника.'),
+      h('p', { class: 'small mute' }, 'Добавлены также отдельные ASN-подписки от ', h('a', { href: 'https://asn.web2core.workers.dev/', target: '_blank', rel: 'noopener noreferrer' }, 'asn.web2core.workers.dev'), '.'),
       h('div', { class: 'row', style: 'margin-bottom:10px;flex-wrap:wrap;gap:8px' },
         presetPicker,
         h('span', { class: 'small mute' }, '→'),
@@ -125,11 +166,12 @@ export default async function (root) {
         h('button', { class: 'btn primary', onclick: () => {
           if (!selectedPresets.size) { toast('Выберите один или несколько шаблонов', 'err'); return; }
           const out = presetSel.out || proxyOut();
+          const addedAt = Date.now();
           let added = 0, skipped = 0;
           for (const i of selectedPresets) {
             const p = PRESETS[i]; const isList = p[1] === 'list'; const name = isList ? p[2] : p[1] + '-' + p[2];
             if (s.rule_sets.some((r) => r.name === name)) { skipped++; continue; }
-            s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: 86400 } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: 86400 });
+            s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: 86400, added_at: addedAt } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: 86400, added_at: addedAt });
             const existing = ruleOf(name);
             if (existing) existing.outbound = out;
             else s.rules.push({ type: 'rule_set', values: [name], outbound: out });
@@ -144,7 +186,7 @@ export default async function (root) {
           else if (added) toast('Добавлено наборов: ' + added + ' → ' + out, 'ok');
           else toast('Выбранные наборы уже добавлены', 'err');
         } }, 'Добавить'),
-        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: 86400 }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
+        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: 86400, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
       setsBox));
   drawSets();
 }

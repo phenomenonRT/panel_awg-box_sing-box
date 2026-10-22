@@ -139,8 +139,35 @@ func (s *Supervisor) RuntimeDir(core string) string {
 	return filepath.Join(s.Info.DataDir, "runtime", core)
 }
 
+// RuleSetsRAMDir — временный каталог наборов. На роутерах /tmp находится в RAM.
+func (s *Supervisor) RuleSetsRAMDir(core string) string {
+	return filepath.Join(os.TempDir(), "corepanel", "rulesets", core)
+}
+
+func (s *Supervisor) ruleSetsRAMDir(set *model.Settings, core string) string {
+	if set == nil || !set.General.RuleSetsRAM {
+		return ""
+	}
+	return s.RuleSetsRAMDir(core)
+}
+
+func settingsWithRuleSetsRAMPaths(set *model.Settings, ramDir string) *model.Settings {
+	copy := *set
+	copy.RuleSets = append([]model.RuleSet(nil), set.RuleSets...)
+	for i := range copy.RuleSets {
+		if rulesets.IsText(copy.RuleSets[i]) {
+			copy.RuleSets[i].LocalPath = filepath.Join(ramDir, filepath.FromSlash(rulesets.File(copy.RuleSets[i].Name)))
+		}
+	}
+	return &copy
+}
+
 // Render генерирует конфиг для выбранного ядра.
 func Render(set *model.Settings) (*gen.Result, error) {
+	if set.General.RuleSetsRAM {
+		ramDir := filepath.Join(os.TempDir(), "corepanel", "rulesets", set.Core)
+		set = settingsWithRuleSetsRAMPaths(set, ramDir)
+	}
 	if issues := set.Validate(); hasError(issues) {
 		var msgs []string
 		for _, i := range issues {
@@ -236,6 +263,12 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 			return err
 		}
 	}
+	ramDir := s.ruleSetsRAMDir(set, set.Core)
+	if ramDir == "" {
+		// При выключении режима убираем оставшуюся RAM-копию, чтобы при повторном включении
+		// она не затенила более свежий файл из постоянного каталога.
+		_ = os.RemoveAll(s.RuleSetsRAMDir(set.Core))
+	}
 	res, err := Render(set)
 	if err != nil {
 		s.lastErr = err.Error()
@@ -245,7 +278,7 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for _, w := range rulesets.Prepare(context.Background(), dir, set.RuleSets, s.rulesetFetcher(set, 0), false) {
+	for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, s.rulesetFetcher(set, 0), false) {
 		res.Warnings = append(res.Warnings, w)
 		s.Logs.Add("[panel] " + w)
 	}
@@ -301,7 +334,7 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	tl := newTailer(logFile, s.Logs, 0)
 	go tl.run()
 	done := s.done
-	go s.refreshRuleSets(set, dir, done)
+	go s.refreshRuleSets(set, dir, ramDir, done)
 	go func() {
 		err := cmd.Wait()
 		tl.Stop()   // дочитать последние строки до сообщения об ошибке
@@ -417,7 +450,7 @@ func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets
 }
 
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.
-func (s *Supervisor) refreshRuleSets(set *model.Settings, dir string, done <-chan struct{}) {
+func (s *Supervisor) refreshRuleSets(set *model.Settings, dir, ramDir string, done <-chan struct{}) {
 	has := false
 	for _, rs := range set.RuleSets {
 		if rulesets.IsText(rs) {
@@ -435,7 +468,7 @@ func (s *Supervisor) refreshRuleSets(set *model.Settings, dir string, done <-cha
 		case <-done:
 			return
 		case <-t.C:
-			for _, w := range rulesets.Prepare(context.Background(), dir, set.RuleSets, fetch, false) {
+			for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, fetch, false) {
 				s.Logs.Add("[panel] " + w)
 			}
 		}

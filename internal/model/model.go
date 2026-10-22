@@ -58,6 +58,7 @@ type General struct {
 	UpdateVia        string `json:"update_via"`        // через какой исходящий качать rule-set'ы
 	TCPFastOpen      bool   `json:"tcp_fast_open"`
 	TCPConcurrent    bool   `json:"tcp_concurrent"`
+	RuleSetsRAM      bool   `json:"rule_sets_ram,omitempty"` // хранить обновления текстовых наборов во временной памяти
 	// MemLimitMB — «сколько памяти можно ядру», МБ: ядро запускается с GOMEMLIMIT, и сборщик мусора
 	// старается держать потребление ниже предела. 0 — без ограничения. В конфиг sing-box не попадает.
 	MemLimitMB int `json:"mem_limit_mb,omitempty"`
@@ -238,10 +239,12 @@ const (
 
 // RuleSet — удалённый набор правил.
 type RuleSet struct {
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Format   string `json:"format"`             // srs | json | text (обычный список доменов)
-	Interval int    `json:"interval,omitempty"` // секунды
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Format    string `json:"format"`             // srs | json | text (обычный список доменов)
+	Interval  int    `json:"interval,omitempty"` // секунды
+	AddedAt   int64  `json:"added_at,omitempty"` // Unix-время в миллисекундах, когда набор добавили в панели
+	LocalPath string `json:"-"`                  // путь текстового файла для активной конфигурации; задаёт Supervisor
 }
 
 // Rule — правило маршрутизации (или DNS-правило).

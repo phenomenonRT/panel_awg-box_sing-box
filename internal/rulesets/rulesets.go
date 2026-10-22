@@ -180,25 +180,52 @@ func NewFetcher(mirrors []string, proxyPort int) Fetcher {
 // не трогает, пока force=false. Возвращает предупреждения; при ошибке без старой копии пишет пустой набор,
 // чтобы ядро всё равно запустилось.
 func Prepare(ctx context.Context, dir string, sets []model.RuleSet, fetch Fetcher, force bool) []string {
+	return PrepareWithRAM(ctx, dir, "", sets, fetch, force)
+}
+
+// PrepareWithRAM хранит базовую копию текстового набора в dir/rulesets, а рабочую копию и метку обновления —
+// в ramDir. Если RAM-копия пропала после перезагрузки, восстанавливает её из базы и сразу проверяет источник.
+func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSet, fetch Fetcher, force bool) []string {
 	var warns []string
 	for _, rs := range sets {
 		if !IsText(rs) || rs.URL == "" {
 			continue
 		}
 		file := filepath.Join(dir, filepath.FromSlash(File(rs.Name)))
-		stamp := file + ".src"
+		activeFile, stamp := file, file+".src"
+		coldRAM := false
+		if ramDir != "" {
+			activeFile = filepath.Join(ramDir, filepath.FromSlash(File(rs.Name)))
+			stamp = activeFile + ".src"
+			if _, err := os.Stat(activeFile); err != nil {
+				if !os.IsNotExist(err) {
+					warns = append(warns, fmt.Sprintf("набор «%s»: %v", rs.Name, err))
+					continue
+				}
+				coldRAM = true
+				if _, err := os.Stat(file); err == nil {
+					if err := copyIfChanged(file, activeFile); err != nil {
+						warns = append(warns, fmt.Sprintf("набор «%s»: не удалось восстановить копию в RAM: %v", rs.Name, err))
+						continue
+					}
+				} else if !os.IsNotExist(err) {
+					warns = append(warns, fmt.Sprintf("набор «%s»: %v", rs.Name, err))
+					continue
+				}
+			}
+		}
 		iv := time.Duration(rs.Interval) * time.Second
 		if iv <= 0 {
 			iv = 24 * time.Hour
 		}
-		if !force {
+		if !force && !coldRAM {
 			if st, err := os.Stat(stamp); err == nil && time.Since(st.ModTime()) < iv {
 				if old, _ := os.ReadFile(stamp); string(old) == rs.URL {
 					continue
 				}
 			}
 		}
-		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(activeFile), 0o700); err != nil {
 			warns = append(warns, fmt.Sprintf("набор «%s»: %v", rs.Name, err))
 			continue
 		}
@@ -207,8 +234,10 @@ func Prepare(ctx context.Context, dir string, sets []model.RuleSet, fetch Fetche
 		cancel()
 		if err != nil {
 			warns = append(warns, fmt.Sprintf("набор «%s»: не удалось скачать %s: %v", rs.Name, rs.URL, err))
-			if _, e := os.Stat(file); e != nil {
-				_ = os.WriteFile(file, []byte(`{"version":2,"rules":[]}`), 0o600)
+			if _, e := os.Stat(activeFile); os.IsNotExist(e) {
+				if writeErr := writeIfChanged(activeFile, []byte(`{"version":2,"rules":[]}`)); writeErr != nil {
+					warns = append(warns, fmt.Sprintf("набор «%s»: не удалось создать пустую копию: %v", rs.Name, writeErr))
+				}
 			}
 			continue
 		}
@@ -216,23 +245,62 @@ func Prepare(ctx context.Context, dir string, sets []model.RuleSet, fetch Fetche
 		if n == 0 {
 			warns = append(warns, fmt.Sprintf("набор «%s»: в списке %s не нашлось ни одного домена или подсети", rs.Name, rs.URL))
 		}
-		old, readErr := os.ReadFile(file)
-		if readErr != nil || !bytes.Equal(old, js) {
-			tmp := file + ".tmp"
-			if err := os.WriteFile(tmp, js, 0o600); err == nil {
-				if err = os.Rename(tmp, file); err != nil {
-					_ = os.Remove(tmp)
-					continue
-				}
-			} else {
+		if ramDir != "" && !hasPersistentBaseline(file, rs.URL) {
+			if err := writeIfChanged(file, js); err != nil {
+				warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить первую копию во флеш-память: %v", rs.Name, err))
 				continue
 			}
+			if err := writeIfChanged(file+".src", []byte(rs.URL)); err != nil {
+				warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить адрес базовой копии: %v", rs.Name, err))
+			}
 		}
-		// Файл набора перезаписываем только при изменении содержимого. Метку
-		// обновляем и при совпадении, чтобы не скачивать тот же список при каждом запуске.
+		if err := writeIfChanged(activeFile, js); err != nil {
+			warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить список: %v", rs.Name, err))
+			continue
+		}
+		// В режиме RAM метка тоже временная: после перезагрузки источник проверится повторно.
 		markFetched(stamp, rs.URL)
 	}
 	return warns
+}
+
+func writeIfChanged(file string, data []byte) error {
+	if old, err := os.ReadFile(file); err == nil {
+		if bytes.Equal(old, data) {
+			return nil
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		return err
+	}
+	tmp := file + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func copyIfChanged(source, dest string) error {
+	b, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	return writeIfChanged(dest, b)
+}
+
+func hasPersistentBaseline(file, sourceURL string) bool {
+	if _, err := os.Stat(file); err != nil {
+		return false
+	}
+	old, err := os.ReadFile(file + ".src")
+	return err == nil && string(old) == sourceURL
 }
 
 func markFetched(stamp, sourceURL string) {

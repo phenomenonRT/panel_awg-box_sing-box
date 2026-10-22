@@ -30,6 +30,7 @@ var PrivateCIDRs = []string{
 type setSpec struct {
 	Name     string
 	URL      string
+	Path     string
 	Format   string // srs|json|text
 	Interval int
 	Auto     bool
@@ -140,7 +141,7 @@ func buildPlan(s *model.Settings, core string) *plan {
 			p.warn("набор правил «%s» (формат %s) не подходит для выбранного ядра и пропущен", rs.Name, f)
 			continue
 		}
-		p.addSet(setSpec{Name: rs.Name, URL: rs.URL, Format: f, Interval: rs.Interval})
+		p.addSet(setSpec{Name: rs.Name, URL: rs.URL, Path: rs.LocalPath, Format: f, Interval: rs.Interval})
 		userSets[rs.Name] = true
 	}
 
