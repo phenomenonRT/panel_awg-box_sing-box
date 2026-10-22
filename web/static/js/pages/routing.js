@@ -207,7 +207,7 @@ export default async function (root) {
           s.rules.push({ type: q[1], values: q[2].slice(), outbound: q[3] === '@proxy' ? proxyOut() : q[3] }); st.touch(); ed.redraw();
         } }, h('option', { value: '' }, 'Добавить по шаблону…'), QUICK.map((q, i) => h('option', { value: i }, q[0])))),
       ed.el),
-    h('div', { class: 'card' }, h('div', { class: 'row', style: 'align-items:center;gap:12px' }, h('h2', { style: 'margin:0' }, 'Наборы правил'), h('span', { class: 'grow' }), refreshRuleSetsButton),
+    h('div', { class: 'card' }, h('h2', 'Наборы правил'),
       h('p', { class: 'small mute' }, 'Набор — это готовый список доменов или подсетей (Telegram, YouTube, реклама…). Выберите набор и то, куда направлять его трафик: правило создастся само и появится в списке «Правила» выше. Ссылки на списки (.srs) подставляются автоматически.'),
       h('p', { class: 'small mute' }, 'Добавлены профили IPv4/IPv6 от ', h('a', { href: 'https://github.com/avgustvishne/CDN-Cloud-MagiTrickle', target: '_blank', rel: 'noopener noreferrer' }, 'CDN-Cloud-MagiTrickle'), '. Их списки обновляются по ссылкам источника.'),
       h('p', { class: 'small mute' }, 'Добавлены также отдельные ASN-подписки от ', h('a', { href: 'https://asn.web2core.workers.dev/', target: '_blank', rel: 'noopener noreferrer' }, 'asn.web2core.workers.dev'), '.'),
@@ -239,7 +239,8 @@ export default async function (root) {
           else if (added) toast('Добавлено наборов: ' + added + ' → ' + out, 'ok');
           else toast('Выбранные наборы уже добавлены', 'err');
         } }, 'Добавить'),
-        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: DEFAULT_RULESET_INTERVAL, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
+        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: DEFAULT_RULESET_INTERVAL, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке'),
+        refreshRuleSetsButton),
       setsBox));
   drawSets();
 }

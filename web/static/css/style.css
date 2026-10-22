@@ -342,18 +342,19 @@ table.conns th.sortable button:focus-visible{outline:2px solid var(--accent);out
 table.conns th.num button{justify-content:flex-end}
 .sa{font-size:9px;color:var(--accent);min-width:8px}
 table.conns{table-layout:fixed;font-size:12.5px}
-table.conns th,table.conns td{padding:3px 8px}
-table.conns td{vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table.conns th,table.conns td{padding:5px 9px}
+table.conns td{vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35}
 table.conns th.sortable{padding:0}
-table.conns th:nth-child(2){width:62px}table.conns th:nth-child(3){width:268px}table.conns th:nth-child(4){width:150px}table.conns th:nth-child(5){width:92px}
-table.conns tbody tr:hover td{background:var(--surface2)}
+table.conns th:nth-child(1){width:24%}table.conns th:nth-child(2){width:9%}table.conns th:nth-child(3){width:24%}table.conns th:nth-child(4){width:26%}table.conns th:nth-child(5){width:17%}
+table.conns tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--surface2) 48%,var(--surface))}
+table.conns tbody tr:hover td{background:var(--accent-soft)}
 td.cdst{cursor:pointer}
 .hostn{font-weight:600;overflow:hidden;text-overflow:ellipsis;font-size:12.5px;line-height:1.3}.csub{color:var(--mute);font-size:11px;overflow:hidden;text-overflow:ellipsis}
-.chain{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}.chain .arr{color:var(--mute)}
-.chain .badge,td.cnet .badge{padding:0 7px;font-size:11.5px}
-.chain .badge{max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.chain{display:inline-flex;align-items:center;gap:3px;flex-wrap:wrap;white-space:normal}.chain .arr{color:var(--mute)}
+.chain .badge,td.cnet .badge{padding:2px 8px;font-size:11.5px}
+.chain .badge{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 td.cnet,td.cch{overflow:visible;text-overflow:clip}
-td.crule{color:var(--mute);font-size:12px}td.crule .rl{overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+td.crule{color:var(--mute);font-size:12px}td.crule .rl{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;white-space:normal;overflow-wrap:anywhere;line-height:1.3}
 td.csrc{color:var(--mute);font-size:11.5px}
 td.num{text-align:right;font-variant-numeric:tabular-nums;line-height:1.3}
 td.ctr .up{color:var(--ink)}td.ctr .down{color:var(--ink)}
@@ -372,6 +373,6 @@ mark{background:var(--warn-soft);color:inherit;border-radius:3px;box-shadow:0 0 
   table.conns td.cch{grid-column:1;grid-row:2}
   table.conns td.crule{grid-column:1 / 3;grid-row:3}
   table.conns td.ctr{grid-column:2;grid-row:2;text-align:right;display:flex;gap:8px;justify-content:flex-end}
-  table.conns tbody tr:hover td{background:transparent}
+  table.conns tbody tr:nth-child(even) td,table.conns tbody tr:hover td{background:transparent}
   input.cq{font-size:16px;min-height:42px}
 }
