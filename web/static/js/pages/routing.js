@@ -1,4 +1,5 @@
 import { apd, h, clear, pageHead, note, field, fgrid, txt, num, dur, sel, chk, toast, help } from '../ui.js';
+import { post } from '../api.js';
 import { ruleEditor } from '../rules.js';
 import * as st from '../state.js';
 import { transparentNote } from '../transparent.js';
@@ -97,6 +98,24 @@ export default async function (root) {
   const ruleOf = (name) => s.rules.find((x) => x.type === 'rule_set' && x.values && x.values.length === 1 && x.values[0] === name);
   const usedElsewhere = (name) => s.rules.filter((x) => x.type === 'rule_set' && x.values && x.values.includes(name) && !(x.values.length === 1)).length;
   const dest = () => [['', 'не направлять (набор только подключён)'], ...outs()];
+  let refreshingRuleSets = false;
+  const refreshRuleSetsButton = h('button', { class: 'btn', onclick: async (e) => {
+    if (refreshingRuleSets) return;
+    refreshingRuleSets = true;
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await post('api/rulesets/refresh', s);
+      const warnings = result.warnings || [];
+      if (warnings.length) toast('Не все наборы обновились (' + warnings.length + '). Подробности в журнале.', 'err');
+      else if (result.checked) {
+        const coreNote = result.managed_by_core ? '; ещё ' + result.managed_by_core + ' удалённых наборов обновляет ядро по интервалу' : '';
+        toast('Панель проверила наборов: ' + result.checked + coreNote, 'ok');
+      } else if (result.managed_by_core) toast('Эти удалённые наборы обновляет ядро по заданному интервалу: ' + result.managed_by_core, 'ok');
+      else toast('Нет наборов с адресом для обновления', '');
+    } catch (err) { toast(err.message || String(err), 'err'); }
+    finally { refreshingRuleSets = false; button.disabled = false; }
+  } }, '↻ Обновить маршруты');
   function setRule(name, out) {
     const r = ruleOf(name);
     if (!out) { if (r) s.rules.splice(s.rules.indexOf(r), 1); }
@@ -188,7 +207,7 @@ export default async function (root) {
           s.rules.push({ type: q[1], values: q[2].slice(), outbound: q[3] === '@proxy' ? proxyOut() : q[3] }); st.touch(); ed.redraw();
         } }, h('option', { value: '' }, 'Добавить по шаблону…'), QUICK.map((q, i) => h('option', { value: i }, q[0])))),
       ed.el),
-    h('div', { class: 'card' }, h('h2', 'Наборы правил'),
+    h('div', { class: 'card' }, h('div', { class: 'row', style: 'align-items:center;gap:12px' }, h('h2', { style: 'margin:0' }, 'Наборы правил'), h('span', { class: 'grow' }), refreshRuleSetsButton),
       h('p', { class: 'small mute' }, 'Набор — это готовый список доменов или подсетей (Telegram, YouTube, реклама…). Выберите набор и то, куда направлять его трафик: правило создастся само и появится в списке «Правила» выше. Ссылки на списки (.srs) подставляются автоматически.'),
       h('p', { class: 'small mute' }, 'Добавлены профили IPv4/IPv6 от ', h('a', { href: 'https://github.com/avgustvishne/CDN-Cloud-MagiTrickle', target: '_blank', rel: 'noopener noreferrer' }, 'CDN-Cloud-MagiTrickle'), '. Их списки обновляются по ссылкам источника.'),
       h('p', { class: 'small mute' }, 'Добавлены также отдельные ASN-подписки от ', h('a', { href: 'https://asn.web2core.workers.dev/', target: '_blank', rel: 'noopener noreferrer' }, 'asn.web2core.workers.dev'), '.'),

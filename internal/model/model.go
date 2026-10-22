@@ -25,17 +25,18 @@ type Settings struct {
 	Autostart bool   `json:"autostart"` // запускать ядро вместе с панелью
 	Update    Update `json:"update"`
 
-	General  General   `json:"general"`
-	Inbounds Inbounds  `json:"inbounds"`
-	Tun      Tun       `json:"tun"`
-	Ifaces   []Iface   `json:"ifaces"` // свои TUN-интерфейсы: весь трафик в них идёт в выбранный выход
-	DNS      DNS       `json:"dns"`
-	Nodes    []Node    `json:"nodes"`
-	Groups   []Group   `json:"groups"`
-	RuleSets []RuleSet `json:"rule_sets"`
-	Rules    []Rule    `json:"rules"`
-	Final    string    `json:"final"` // исходящий по умолчанию (имя группы/узла/direct)
-	Firewall Firewall  `json:"firewall"`
+	General       General        `json:"general"`
+	Inbounds      Inbounds       `json:"inbounds"`
+	Tun           Tun            `json:"tun"`
+	Ifaces        []Iface        `json:"ifaces"` // свои TUN-интерфейсы: весь трафик в них идёт в выбранный выход
+	DNS           DNS            `json:"dns"`
+	Nodes         []Node         `json:"nodes"`
+	Subscriptions []Subscription `json:"subscriptions"`
+	Groups        []Group        `json:"groups"`
+	RuleSets      []RuleSet      `json:"rule_sets"`
+	Rules         []Rule         `json:"rules"`
+	Final         string         `json:"final"` // исходящий по умолчанию (имя группы/узла/direct)
+	Firewall      Firewall       `json:"firewall"`
 
 	Download Download `json:"download"`
 	Recovery Recovery `json:"recovery"` // автовосстановление ядра при затяжном сбое рукопожатий
@@ -213,6 +214,18 @@ type Group struct {
 	Timeout int `json:"timeout,omitempty"`
 }
 
+// Subscription — сохранённая URL-подписка и имена узлов, загруженных из неё.
+type Subscription struct {
+	URL   string             `json:"url"`
+	Nodes []SubscriptionNode `json:"nodes"`
+}
+
+// SubscriptionNode связывает имя узла из подписки с именем в настройках панели.
+type SubscriptionNode struct {
+	SourceName string `json:"source_name"`
+	NodeName   string `json:"node_name"`
+}
+
 // Допустимый таймаут проверки задержки из панели, мс. Clash-API ядра принимает timeout не больше
 // 32767 мс: при большем оно отвечает «400 Bad Request», и узел показывается как «сбой» без проверки.
 // Предел панели ниже лимита ядра с запасом.
@@ -315,7 +328,7 @@ func Default() *Settings {
 		Recovery: Recovery{FailThreshold: 5, MaxRestarts: 3, InterfaceCheckIntervalSec: RecoveryIfaceIntervalDefaultSec},
 		Firewall: Firewall{Mode: "off", Backend: "auto", FwMark: 1, RouteTable: 100,
 			LANIfaces: []string{}, Include: []string{}, Exclude: []string{}, BypassDst: []string{}},
-		Nodes: []Node{}, Groups: []Group{}, RuleSets: []RuleSet{}, Rules: []Rule{},
+		Nodes: []Node{}, Subscriptions: []Subscription{}, Groups: []Group{}, RuleSets: []RuleSet{}, Rules: []Rule{},
 	}
 }
 
@@ -410,6 +423,14 @@ func (s *Settings) Normalize() {
 		s.Recovery.InterfaceCheckIntervalSec = RecoveryIfaceIntervalMinSec
 	case s.Recovery.InterfaceCheckIntervalSec > RecoveryIfaceIntervalMaxSec:
 		s.Recovery.InterfaceCheckIntervalSec = RecoveryIfaceIntervalMaxSec
+	}
+	if s.Subscriptions == nil {
+		s.Subscriptions = []Subscription{}
+	}
+	for i := range s.Subscriptions {
+		if s.Subscriptions[i].Nodes == nil {
+			s.Subscriptions[i].Nodes = []SubscriptionNode{}
+		}
 	}
 	if s.Firewall.Mode == "" {
 		s.Firewall.Mode = "off"

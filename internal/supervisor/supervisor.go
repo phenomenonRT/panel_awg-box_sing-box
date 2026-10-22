@@ -98,6 +98,7 @@ type Supervisor struct {
 	Logs *LogBuffer
 
 	mu        sync.Mutex
+	rulesetMu sync.Mutex
 	cmd       *exec.Cmd
 	done      chan struct{}
 	core      string
@@ -284,7 +285,10 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, s.rulesetFetcher(set, 0), false) {
+	s.rulesetMu.Lock()
+	ruleSetWarnings := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, s.rulesetFetcher(set, 0), false)
+	s.rulesetMu.Unlock()
+	for _, w := range ruleSetWarnings {
 		res.Warnings = append(res.Warnings, w)
 		s.Logs.Add("[panel] " + w)
 	}
@@ -518,6 +522,43 @@ func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets
 	return rulesets.NewFetcher(mirrors, proxyPort)
 }
 
+// RefreshRuleSets вручную проверяет и обновляет наборы, которые скачивает панель.
+// В отличие от фонового обновления, force также игнорирует интервал 0.
+func (s *Supervisor) RefreshRuleSets(set *model.Settings) (int, int, []string) {
+	if set == nil {
+		return 0, 0, []string{"настройки не заданы"}
+	}
+	var updateSets []model.RuleSet
+	managedByCore := 0
+	for _, rs := range set.RuleSets {
+		if rs.URL == "" {
+			continue
+		}
+		if rulesets.IsText(rs) || rs.Interval <= 0 {
+			updateSets = append(updateSets, rs)
+		} else {
+			managedByCore++
+		}
+	}
+	if len(updateSets) == 0 {
+		return 0, managedByCore, nil
+	}
+	proxyPort := 0
+	status := s.Status()
+	if status.State == "running" && status.Core == set.Core {
+		proxyPort = set.Inbounds.MixedPort
+	}
+	dir := s.RuntimeDir(set.Core)
+	ramDir := s.ruleSetsRAMDir(set, set.Core)
+	s.rulesetMu.Lock()
+	warnings := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, updateSets, s.rulesetFetcher(set, proxyPort), true)
+	s.rulesetMu.Unlock()
+	for _, warning := range warnings {
+		s.Logs.Add("[panel] " + warning)
+	}
+	return len(updateSets), managedByCore, warnings
+}
+
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.
 func (s *Supervisor) refreshRuleSets(set *model.Settings, dir, ramDir string, done <-chan struct{}) {
 	var updateSets []model.RuleSet
@@ -537,7 +578,10 @@ func (s *Supervisor) refreshRuleSets(set *model.Settings, dir, ramDir string, do
 		case <-done:
 			return
 		case <-t.C:
-			for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, updateSets, fetch, false) {
+			s.rulesetMu.Lock()
+			warnings := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, updateSets, fetch, false)
+			s.rulesetMu.Unlock()
+			for _, w := range warnings {
 				s.Logs.Add("[panel] " + w)
 			}
 		}

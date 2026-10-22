@@ -146,6 +146,7 @@ func (s *Server) Handler() http.Handler {
 	api("PUT", "settings", s.putSettings, true)
 	api("POST", "validate", s.validate, true)
 	api("POST", "render", s.render, true)
+	api("POST", "rulesets/refresh", s.refreshRuleSets, true)
 	api("GET", "status", func(w http.ResponseWriter, r *http.Request) { ok(w, s.Sup.Status()) }, true)
 	api("POST", "service/start", s.svc("start"), true)
 	api("POST", "service/stop", s.svc("stop"), true)
@@ -555,6 +556,22 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request) {
 		res.Warnings = []string{}
 	}
 	ok(w, res)
+}
+
+func (s *Server) refreshRuleSets(w http.ResponseWriter, r *http.Request) {
+	set := s.readSettings(w, r)
+	if set == nil {
+		return
+	}
+	checked, managedByCore, warnings := s.Sup.RefreshRuleSets(set)
+	ok(w, map[string]any{"checked": checked, "managed_by_core": managedByCore, "warnings": nonNilStrings(warnings)})
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func (s *Server) fwPreview(w http.ResponseWriter, r *http.Request) {

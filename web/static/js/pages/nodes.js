@@ -142,13 +142,146 @@ export default async function (root) {
     try { applyImport(await fn()); } catch (e) { toastErr(e); }
     btn.disabled = false;
   };
+  const subscriptionsBox = h('div');
+  const subscriptionsResult = h('div');
+  let subscriptionsBusy = false;
+  const subscriptionNodeName = (n) => {
+    const name = String(n.name || '').trim();
+    return name || String(n.server ? n.server + ':' + n.port : n.type || 'Узел').trim();
+  };
+  function showSubscriptionResult(r) {
+    const nodes = (r && r.nodes) || [], errors = (r && r.errors) || [];
+    clear(impRes).append(
+      nodes.length ? note('ok', 'Распознано узлов: ' + nodes.length + '.') : note('warn', 'Ни одного узла не распознано.'),
+      errors.length ? note('err', h('b', 'Не удалось разобрать (' + errors.length + '):'), h('ul', errors.map((e) => h('li', { class: 'mono' }, e)))) : null);
+  }
+  function mergeSubscription(sub, result) {
+    const incoming = (result && result.nodes) || [], errors = (result && result.errors) || [];
+    if (!incoming.length) throw new Error('подписка не содержит распознанных узлов');
+
+    const refs = Array.isArray(sub.nodes) ? sub.nodes : [];
+    const tracked = new Set(refs.map((ref) => ref.node_name));
+    const oldNodes = s.nodes.filter((n) => tracked.has(n.name));
+    const oldByName = new Map(oldNodes.map((n) => [n.name, n]));
+    const otherNodes = s.nodes.filter((n) => !tracked.has(n.name));
+    const taken = new Set([...otherNodes.map((n) => n.name), ...s.groups.map((g) => g.name)]);
+    const bySource = new Map();
+    for (const ref of refs) {
+      if (!bySource.has(ref.source_name)) bySource.set(ref.source_name, []);
+      bySource.get(ref.source_name).push(ref);
+    }
+
+    const updatedNodes = [], updatedRefs = [], matched = new Set();
+    for (const node of incoming) {
+      const sourceName = subscriptionNodeName(node);
+      const candidates = bySource.get(sourceName) || [];
+      const previous = candidates.shift();
+      let nodeName = previous && !taken.has(previous.node_name)
+        ? previous.node_name
+        : st.uniqueName(sourceName, taken);
+      const old = oldByName.get(nodeName);
+      if (old) {
+        matched.add(nodeName);
+        if (old.disabled !== undefined) node.disabled = old.disabled;
+        if (old.detour) node.detour = old.detour;
+        if (old.bind_interface) node.bind_interface = old.bind_interface;
+        if (old.system && (node.type === 'wireguard' || node.type === 'awg')) node.system = true;
+      }
+      node.name = nodeName;
+      taken.add(nodeName);
+      updatedNodes.push(node);
+      updatedRefs.push({ source_name: sourceName, node_name: nodeName });
+    }
+
+    // При частично разобранной подписке сохраняем узлы, которые могли не попасть в ответ из-за ошибки.
+    const retained = errors.length ? oldNodes.filter((n) => !matched.has(n.name)) : [];
+    const retainedNames = new Set(retained.map((n) => n.name));
+    sub.nodes = [
+      ...(errors.length ? refs.filter((ref) => retainedNames.has(ref.node_name)) : []),
+      ...updatedRefs,
+    ];
+    s.nodes = [...otherNodes, ...retained, ...updatedNodes];
+    return { count: updatedNodes.length, errors };
+  }
+  function drawSubscriptions() {
+    clear(subscriptionsBox);
+    const list = s.subscriptions || [];
+    bRefreshSubscriptions.disabled = subscriptionsBusy || list.length === 0;
+    bRefreshSubscriptions.textContent = subscriptionsBusy ? 'Обновляю…' : 'Обновить подписки';
+    bAddSubscription.disabled = subscriptionsBusy;
+    if (!list.length) {
+      subscriptionsBox.append(h('p', { class: 'small mute' }, 'Сохранённых подписок пока нет. Добавьте URL выше, чтобы обновлять его вместе с остальными.'));
+      return;
+    }
+    subscriptionsBox.append(h('div', { class: 'stack' }, list.map((sub, i) => h('div', { class: 'row', style: 'align-items:center;gap:8px' },
+      h('span', { class: 'mono small grow', style: 'overflow-wrap:anywhere' }, sub.url),
+      h('span', { class: 'small mute nowrap' }, (sub.nodes || []).length + ' узлов'),
+      h('button', { class: 'btn sm danger', disabled: subscriptionsBusy, title: 'Удалить URL; узлы останутся в списке', onclick: async () => {
+        if (!(await confirmBox('Убрать URL подписки? Импортированные узлы останутся в списке и станут обычными узлами.'))) return;
+        s.subscriptions.splice(i, 1); st.touch(); drawSubscriptions();
+      } }, 'Удалить')))));
+  }
+  async function addSubscription() {
+    const url = imp.url.trim();
+    if (!url) { toast('Укажите URL подписки', 'err'); return; }
+    if ((s.subscriptions || []).some((sub) => sub.url === url)) { toast('Эта подписка уже сохранена', 'warn'); return; }
+    subscriptionsBusy = true; drawSubscriptions();
+    try {
+      const result = await post('api/import/url', { url });
+      const nodes = (result && result.nodes) || [];
+      showSubscriptionResult(result);
+      if (!nodes.length) { toast('В подписке нет распознанных узлов', 'warn'); return; }
+
+      const trackedElsewhere = new Set((s.subscriptions || []).flatMap((sub) => (sub.nodes || []).map((n) => n.node_name)));
+      const taken = takenNames();
+      const refs = [];
+      const claimed = new Set();
+      for (const node of nodes) {
+        const sourceName = subscriptionNodeName(node);
+        // Повторно используем совпадающие узлы, ранее импортированные разово по этому же URL.
+        const existing = s.nodes.find((n) => !trackedElsewhere.has(n.name) && !claimed.has(n.name) && n.name === sourceName &&
+          n.type === node.type && n.server === node.server && Number(n.port || 0) === Number(node.port || 0));
+        const nodeName = existing ? existing.name : st.uniqueName(sourceName, taken);
+        if (!existing) { node.name = nodeName; s.nodes.push(node); }
+        refs.push({ source_name: sourceName, node_name: nodeName });
+        taken.add(nodeName); claimed.add(nodeName);
+      }
+      s.subscriptions.push({ url, nodes: refs });
+      st.touch(); redraw(); drawSubscriptions();
+      toast('Подписка добавлена: ' + refs.length + ' узлов. Сохраните настройки.', 'ok');
+    } catch (e) { toastErr(e); }
+    finally { subscriptionsBusy = false; drawSubscriptions(); }
+  }
+  async function refreshSubscriptions() {
+    const list = [...(s.subscriptions || [])];
+    if (!list.length || subscriptionsBusy) return;
+    subscriptionsBusy = true; drawSubscriptions();
+    const failures = [];
+    let updated = 0;
+    for (const sub of list) {
+      try {
+        const result = await post('api/import/url', { url: sub.url });
+        const merged = mergeSubscription(sub, result);
+        updated += merged.count;
+        if (merged.errors.length) failures.push(sub.url + ': часть строк не разобрана (' + merged.errors.length + ')');
+      } catch (e) { failures.push(sub.url + ': ' + ((e && e.message) || 'ошибка')); }
+    }
+    if (updated) { st.touch(); redraw(); }
+    clear(subscriptionsResult).append(failures.length
+      ? note('warn', 'Обновлено узлов: ' + updated + '. Ошибки: ' + failures.join('; '))
+      : note('ok', 'Подписки обновлены, узлов обработано: ' + updated + '. Не забудьте сохранить настройки.'));
+    subscriptionsBusy = false; drawSubscriptions();
+  }
   const ta = area(imp, 'text', { rows: 5, ph: 'vless://…\nvmess://…\ntrojan://…\nss://…\nhysteria2://…\ntuic://…\nили подписка в base64, или содержимое WireGuard/AWG .conf, или JSON endpoint awg' });
   const bText = h('button', { class: 'btn primary' }, 'Разобрать и добавить');
   bText.onclick = runImport(bText, () => { if (!imp.text.trim()) throw new Error('Вставьте ссылки или конфигурацию'); return post('api/import', { text: imp.text }); });
   const fileIn = h('input', { type: 'file', accept: '.conf,.txt,.json,text/plain,application/json', 'aria-label': 'Файл конфигурации', onchange: async (e) => { const f = e.target.files[0]; if (f) { ta.value = imp.text = await f.text(); e.target.value = ''; } } });
   const urlIn = txt(imp, 'url', { ph: 'https://example.com/sub?token=…' });
-  const bUrl = h('button', { class: 'btn' }, 'Загрузить подписку');
-  bUrl.onclick = runImport(bUrl, () => { if (!imp.url.trim()) throw new Error('Укажите URL подписки'); return post('api/import/url', { url: imp.url.trim() }); });
+  const bAddSubscription = h('button', { class: 'btn' }, 'Добавить подписку');
+  bAddSubscription.onclick = addSubscription;
+  const bRefreshSubscriptions = h('button', { class: 'btn primary' }, 'Обновить подписки');
+  bRefreshSubscriptions.onclick = refreshSubscriptions;
+  drawSubscriptions();
 
   // ---- VPN-интерфейсы ----
   function drawVpn() {
@@ -171,8 +304,10 @@ export default async function (root) {
     h('div', { class: 'card', style: 'margin-top:14px' }, h('h2', 'Импорт'),
       field('Ссылки, подписка или WireGuard-конфиг', ta, 'Можно вставить несколько ссылок по одной в строке, содержимое подписки (base64) или текст файла .conf; для AmneziaWG — также JSON с endpoint типа awg (бэкап другой панели или секция endpoints из конфига sing-box).'),
       h('div', { class: 'row', style: 'margin-bottom:12px' }, bText, fileIn),
-      h('div', { class: 'row', style: 'align-items:flex-end' }, h('div', { class: 'grow', style: 'min-width:220px' }, field('Подписка по URL', urlIn)), h('div', { style: 'margin-bottom:10px' }, bUrl)),
-      impRes),
+      h('div', { class: 'row', style: 'align-items:flex-end' }, h('div', { class: 'grow', style: 'min-width:220px' }, field('Подписка по URL', urlIn)), h('div', { style: 'margin-bottom:10px' }, bAddSubscription)),
+      impRes,
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('h3', { class: 'grow' }, 'Сохранённые подписки'), bRefreshSubscriptions),
+      subscriptionsBox, subscriptionsResult),
     vpnBox);
   redraw();
   loadPings();

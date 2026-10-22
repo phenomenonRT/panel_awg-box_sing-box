@@ -234,7 +234,7 @@ func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSe
 			}
 		}
 		iv := time.Duration(rs.Interval) * time.Second
-		if iv <= 0 {
+		if iv <= 0 && !force {
 			if sourceMatches(stamp, rs.URL) || hasPersistentBaseline(file, rs.URL) {
 				continue
 			}

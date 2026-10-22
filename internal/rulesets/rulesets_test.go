@@ -50,7 +50,13 @@ func TestPrepare(t *testing.T) {
 	dir := t.TempDir()
 	sets := []model.RuleSet{{Name: "set-2", URL: "https://x.test/inside-raw.lst"}, {Name: "bin", URL: "https://x.test/a.srs"}}
 	calls := 0
-	ok := func(ctx context.Context, u string) ([]byte, error) { calls++; return []byte("a.com\nb.org\n"), nil }
+	ok := func(ctx context.Context, u string) ([]byte, error) {
+		calls++
+		if u == "https://x.test/a.srs" {
+			return []byte("SRS\x00"), nil
+		}
+		return []byte("a.com\nb.org\n"), nil
+	}
 	if w := Prepare(context.Background(), dir, sets, ok, false); len(w) != 0 {
 		t.Fatal(w)
 	}
@@ -59,20 +65,21 @@ func TestPrepare(t *testing.T) {
 		t.Fatal(err)
 	}
 	Prepare(context.Background(), dir, sets, ok, false)
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatalf("свежий набор скачан повторно: %d", calls)
 	}
 	// ошибка скачивания: старая копия остаётся, повтор будет при следующем проходе
 	bad := func(ctx context.Context, u string) ([]byte, error) { return nil, context.DeadlineExceeded }
 	dir2 := t.TempDir()
-	if w := Prepare(context.Background(), dir2, sets, bad, false); len(w) != 1 {
+	if w := Prepare(context.Background(), dir2, sets, bad, false); len(w) != 2 {
 		t.Fatal(w)
 	}
 	if _, err := os.Stat(filepath.Join(dir2, "rulesets", "set-2.json")); err != nil {
 		t.Fatal("ядру нужен хотя бы пустой файл")
 	}
+	beforeRetry := calls
 	Prepare(context.Background(), dir2, sets, ok, false)
-	if calls != 2 {
+	if calls-beforeRetry != 2 {
 		t.Fatal("после неудачи скачивание должно повториться")
 	}
 }

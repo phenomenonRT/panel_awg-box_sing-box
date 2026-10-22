@@ -11,7 +11,9 @@ export const isDirty = () => !!S.settings && JSON.stringify(S.settings) !== S.sa
 export function normalize(s) {
   const arr = (o, k) => { if (!Array.isArray(o[k])) o[k] = []; };
   for (const k of ['general', 'inbounds', 'tun', 'dns', 'firewall', 'download', 'update', 'recovery']) if (!s[k] || typeof s[k] !== 'object') s[k] = {};
-  for (const k of ['nodes', 'groups', 'rule_sets', 'rules', 'ifaces']) arr(s, k);
+  for (const k of ['nodes', 'subscriptions', 'groups', 'rule_sets', 'rules', 'ifaces']) arr(s, k);
+  s.subscriptions = s.subscriptions.filter((sub) => sub && typeof sub === 'object' && !Array.isArray(sub));
+  for (const sub of s.subscriptions) arr(sub, 'nodes');
   arr(s.dns, 'rules'); arr(s.tun, 'exclude_cidr'); arr(s.download, 'mirrors');
   if (s.download.mirror) { // старое поле «одно зеркало» переезжает в список
     const m = String(s.download.mirror).trim();
@@ -106,6 +108,7 @@ export function renameRef(oldN, newN) {
   if (s.dns.remote_detour === oldN) s.dns.remote_detour = newN;
   if (s.dns.local_detour === oldN) s.dns.local_detour = newN;
   for (const f of s.ifaces || []) if (f.outbound === oldN) f.outbound = newN;
+  for (const sub of s.subscriptions || []) for (const n of sub.nodes || []) if (n.node_name === oldN) n.node_name = newN;
 }
 // Перехват DNS брандмауэром не работает при слушателе на 127.0.0.1: переносим его на адрес роутера в LAN.
 export async function fixDnsListen() {
@@ -131,7 +134,8 @@ export async function fixDnsListen() {
 export function pruneRefs() {
   const s = S.settings, out = [];
   const have = new Set(['direct', 'block']);
-  for (const n of s.nodes) have.add(n.name);
+  const haveNodes = new Set();
+  for (const n of s.nodes) { have.add(n.name); haveNodes.add(n.name); }
   for (const g of s.groups) have.add(g.name);
   for (const g of s.groups) {
     const keep = g.members.filter((m) => have.has(m));
@@ -142,6 +146,14 @@ export function pruneRefs() {
   s.rules.forEach((r, i) => { if (r.outbound && !have.has(r.outbound)) { out.push('правило №' + (i + 1) + ': «' + r.outbound + '» → direct'); r.outbound = 'direct'; } });
   if (s.general.update_via && !have.has(s.general.update_via)) { out.push('загрузка наборов правил: сброшен прокси'); s.general.update_via = ''; }
   if (s.dns.remote_detour && !have.has(s.dns.remote_detour)) { out.push('DNS remote: сброшен «Remote через»'); s.dns.remote_detour = ''; }
+  for (const sub of s.subscriptions || []) {
+    const previous = Array.isArray(sub.nodes) ? sub.nodes : [];
+    const refs = previous.filter((n) => n && haveNodes.has(n.node_name));
+    if (refs.length !== previous.length || !Array.isArray(sub.nodes)) {
+      out.push('подписка: убраны ссылки на удалённые узлы');
+      sub.nodes = refs;
+    }
+  }
   if (out.length) window.dispatchEvent(new CustomEvent('cp-fixed', { detail: out }));
   return out;
 }
