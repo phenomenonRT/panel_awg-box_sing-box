@@ -1,4 +1,4 @@
-import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, num, dur, sel, toast, confirmBox } from '../ui.js';
+import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, num, dur, sel, chk, toast, confirmBox } from '../ui.js';
 import * as st from '../state.js';
 
 const S = st.S;
