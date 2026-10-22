@@ -53,30 +53,39 @@ func (s *Server) restartInterface(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Не привязываем команды netifd к HTTP-контексту: связь с роутером может
-	// пропасть после down, но команда up всё равно должна выполниться.
+	// Связь с роутером может пропасть после down, но команда up всё равно должна выполниться.
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	ubus, err := findUbus()
-	if err != nil {
-		fail(w, 500, "не найден ubus OpenWrt: "+err.Error())
-		return
-	}
-	logical, err := netifdLogicalInterface(ctx, ubus, in.Interface)
+	logical, err := restartNetifdInterface(ctx, in.Interface)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
 	}
+	ok(w, map[string]any{"restarted": true, "interface": in.Interface, "logical_interface": logical})
+}
+
+// restartNetifdInterface cycles the OpenWrt logical interface for a Linux device.
+// It is shared by the manual API action and automatic tunnel recovery.
+func restartNetifdInterface(ctx context.Context, device string) (string, error) {
+	if !linuxIfaceName.MatchString(device) {
+		return "", fmt.Errorf("неверное имя Linux-интерфейса")
+	}
+	ubus, err := findUbus()
+	if err != nil {
+		return "", fmt.Errorf("не найден ubus OpenWrt: %w", err)
+	}
+	logical, err := netifdLogicalInterface(ctx, ubus, device)
+	if err != nil {
+		return "", err
+	}
 	if !netifdName.MatchString(logical) {
-		fail(w, 500, "netifd вернул некорректное имя логического интерфейса")
-		return
+		return "", fmt.Errorf("netifd вернул некорректное имя логического интерфейса")
 	}
 
 	object := "network.interface." + logical
 	_, downErr := callUbus(ctx, ubus, object, "down")
 	time.Sleep(time.Second)
-	// Команду up выполняем в отдельном контексте: даже если down занял
-	// большую часть общего лимита, интерфейс всё равно нужно поднять обратно.
+	// Подъём выполняем в отдельном контексте, даже если команда down заняла лимит.
 	upCtx, cancelUp := context.WithTimeout(context.Background(), 25*time.Second)
 	_, upErr := callUbus(upCtx, ubus, object, "up")
 	cancelUp()
@@ -87,14 +96,12 @@ func (s *Server) restartInterface(w http.ResponseWriter, r *http.Request) {
 		} else {
 			msg += "; не удалось включить интерфейс повторно: " + upErr.Error()
 		}
-		fail(w, 500, msg)
-		return
+		return "", fmt.Errorf("%s", msg)
 	}
 	if upErr != nil {
-		fail(w, 500, "не удалось включить интерфейс OpenWrt: "+upErr.Error())
-		return
+		return "", fmt.Errorf("не удалось включить интерфейс OpenWrt: %w", upErr)
 	}
-	ok(w, map[string]any{"restarted": true, "interface": in.Interface, "logical_interface": logical})
+	return logical, nil
 }
 
 func findUbus() (string, error) {

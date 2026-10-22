@@ -97,36 +97,38 @@ type Supervisor struct {
 	Inst *installer.Installer
 	Logs *LogBuffer
 
-	mu        sync.Mutex
-	rulesetMu sync.Mutex
-	cmd       *exec.Cmd
-	done      chan struct{}
-	core      string
-	startedAt time.Time
-	lastErr   string
-	fwErr     string
-	fw        *firewall.Scripts
-	ifw       *firewall.Scripts // маршруты устройств в свои интерфейсы
-	nfw       *firewall.Scripts // маршруты узлов «Системный VPN (интерфейс)»
-	v6        *firewall.Scripts // блокировка IPv6 на время работы ядра
-	desired   bool
-	restarts  int
-	waitNet   bool // ядро не стартовало из-за отсутствия сети: повторяем запуск без красной ошибки
-	netLoop   bool
-	waitSince time.Time
-	waitWhy   string
-	warnings  []string
-	version   string
-	getSet    func() *model.Settings
-	bin       string // путь к запущенному ядру (для передачи новой панели)
-	logFile   string // файл вывода ядра
+	mu                 sync.Mutex
+	rulesetMu          sync.Mutex
+	cmd                *exec.Cmd
+	done               chan struct{}
+	core               string
+	startedAt          time.Time
+	lastErr            string
+	fwErr              string
+	fw                 *firewall.Scripts
+	ifw                *firewall.Scripts // маршруты устройств в свои интерфейсы
+	nfw                *firewall.Scripts // маршруты узлов «Системный VPN (интерфейс)»
+	v6                 *firewall.Scripts // блокировка IPv6 на время работы ядра
+	desired            bool
+	restarts           int
+	waitNet            bool // ядро не стартовало из-за отсутствия сети: повторяем запуск без красной ошибки
+	netLoop            bool
+	waitSince          time.Time
+	waitWhy            string
+	warnings           []string
+	version            string
+	getSet             func() *model.Settings
+	interfaceRestarter func(context.Context, string) error
+	bin                string // путь к запущенному ядру (для передачи новой панели)
+	logFile            string // файл вывода ядра
 
 	// автовосстановление при затяжном сбое рукопожатий (см. recovery.go)
-	recovering   bool           // перезапуск уже идёт: второй не начинаем
-	recoverTries int            // сколько автоперезапусков подряд уже сделано
-	recoverNote  string         // предупреждение автовосстановления (показывается в статусе)
-	awgFails     map[string]int // неудачные рукопожатия подряд по узлам endpoint/awg[...]
-	ifaceFails   map[string]int // последовательные проверки отсутствующих системных интерфейсов
+	recovering    bool           // перезапуск уже идёт: второй не начинаем
+	recoverTries  int            // сколько автоперезапусков подряд уже сделано
+	recoverNote   string         // предупреждение автовосстановления (показывается в статусе)
+	awgFails      map[string]int // неудачные рукопожатия подряд по узлам endpoint/awg[...]
+	ifaceFails    map[string]int // последовательные проверки интерфейса или ответа системного VPN
+	ifaceRestarts map[string]int // неудачные переподключения системного VPN по интерфейсам
 }
 
 // New создаёт супервизор. getSettings вызывается при автоперезапуске.
@@ -134,6 +136,14 @@ func New(info platform.Info, inst *installer.Installer, getSettings func() *mode
 	s := &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), getSet: getSettings}
 	go s.watchHandshakes()
 	return s
+}
+
+// SetInterfaceRestarter задаёт системный способ переподключения VPN-интерфейса.
+// В OpenWrt сервер подключает сюда netifd; ядро Amnezia-box при этом не перезапускается.
+func (s *Supervisor) SetInterfaceRestarter(restart func(context.Context, string) error) {
+	s.mu.Lock()
+	s.interfaceRestarter = restart
+	s.mu.Unlock()
 }
 
 // RuntimeDir — рабочий каталог ядра.
@@ -424,8 +434,8 @@ func (s *Supervisor) startRouteWatchesLocked(set *model.Settings, done <-chan st
 	go s.watchInterfaceRecovery(done)
 }
 
-// watchInterfaceRecovery перезапускает ядро, если системный интерфейс узла отсутствует или выключен
-// пять проверок подряд. Сам интерфейс обслуживается системой или сетевой службой, не ядром.
+// watchInterfaceRecovery перезапускает системный VPN через netifd, если интерфейс отсутствует,
+// выключен или не проходит проверку доступности через Clash API пять раз подряд.
 func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
 	// Проверяем настройки раз в секунду, чтобы изменение интервала применялось без перезапуска панели.
 	t := time.NewTicker(time.Second)
@@ -438,9 +448,10 @@ func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
 			return
 		case <-t.C:
 			set := s.getSet()
-			if set == nil || !set.Recovery.InterfaceRestartEnabled {
+			if set == nil || !set.Recovery.InterfaceRestartEnabled || s.Info.OS != platform.OpenWrt {
 				s.mu.Lock()
 				s.ifaceFails = nil
+				s.ifaceRestarts = nil
 				s.mu.Unlock()
 				checkInterval = 0
 				nextCheck = time.Time{}
@@ -458,27 +469,48 @@ func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
 			}
 			nextCheck = now.Add(checkInterval)
 			checks := firewall.CheckNodeIfaceLinks(set)
-			seen := make(map[string]bool, len(checks))
+			byIface := make(map[string][]firewall.NodeIfaceLink, len(checks))
 			for _, check := range checks {
-				if seen[check.Iface] {
-					continue // один интерфейс может использоваться несколькими узлами; считаем проверку один раз
-				}
-				seen[check.Iface] = true
-				if check.Active {
-					s.mu.Lock()
-					if s.ifaceFails == nil {
-						s.ifaceFails = map[string]int{}
-					}
-					s.ifaceFails[check.Iface] = 0
-					s.mu.Unlock()
+				byIface[check.Iface] = append(byIface[check.Iface], check)
+			}
+			seen := make(map[string]bool, len(byIface))
+			for iface, nodes := range byIface {
+				seen[iface] = true
+				if len(nodes) == 0 {
 					continue
 				}
-				s.noteMissingInterface(set, check.Node, check.Iface)
+				if !nodes[0].Active {
+					s.noteInterfaceFailure(set, nodes[0].Node, iface, "интерфейс отсутствует или выключен")
+					continue
+				}
+				ok := false
+				probeErr := errors.New("нет узла для проверки")
+				for _, link := range nodes {
+					nd, exists := findEnabledInterfaceNode(set, link.Node, iface)
+					if !exists {
+						continue
+					}
+					probeErr = s.probeInterfaceNode(context.Background(), set, nd)
+					if probeErr == nil {
+						ok = true
+						break
+					}
+				}
+				if ok {
+					s.noteInterfaceHealthy(iface)
+				} else {
+					s.noteInterfaceFailure(set, nodes[0].Node, iface, "узел не отвечает на проверку задержки: "+probeErr.Error())
+				}
 			}
 			s.mu.Lock()
 			for iface := range s.ifaceFails {
 				if !seen[iface] { // удалённый из настроек интерфейс больше не должен влиять на счётчик
 					delete(s.ifaceFails, iface)
+				}
+			}
+			for iface := range s.ifaceRestarts {
+				if !seen[iface] {
+					delete(s.ifaceRestarts, iface)
 				}
 			}
 			s.mu.Unlock()

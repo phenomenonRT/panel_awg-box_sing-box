@@ -360,6 +360,13 @@ func sbOutbounds(s *model.Settings, p *plan) ([]any, []any) {
 		switch g.Type {
 		case "selector":
 			o.Set("type", "selector").Set("outbounds", members)
+			for _, member := range members {
+				if g.Default == member {
+					o.Set("default", g.Default)
+					break
+				}
+			}
+			o.Opt("interrupt_exist_connections", g.InterruptExistingConnections)
 		case "fallback":
 			// В sing-box нет отдельного fallback. urltest держит выбранный узел, пока его проверка
 			// проходит, если другой не быстрее больше чем на tolerance; при огромном допуске он
@@ -373,14 +380,26 @@ func sbOutbounds(s *model.Settings, p *plan) ([]any, []any) {
 				Set("url", orDefault(g.URL, "https://www.gstatic.com/generate_204")).
 				Set("interval", durStr(iv)).
 				Set("tolerance", fallbackTolerance)
-		case "loadbalance", "urltest":
-			if g.Type != "urltest" {
+			if g.IdleTimeout > 0 {
+				o.Set("idle_timeout", durStr(g.IdleTimeout))
+			}
+			o.Opt("interrupt_exist_connections", g.InterruptExistingConnections)
+		case "loadbalance", "urltest", "urltest_stable":
+			if g.Type == "loadbalance" {
 				p.warn("группа «%s»: тип %s в sing-box отсутствует — использован urltest", g.Name, g.Type)
+			}
+			tolerance := g.Tolerance
+			if g.Type == "urltest_stable" && tolerance == 0 {
+				tolerance = 500
 			}
 			o.Set("type", "urltest").Set("outbounds", members).
 				Set("url", orDefault(g.URL, "https://www.gstatic.com/generate_204")).
 				Set("interval", durStr(g.Interval)).
-				Opt("tolerance", minInt(g.Tolerance, fallbackTolerance))
+				Opt("tolerance", minInt(tolerance, fallbackTolerance))
+			if g.IdleTimeout > 0 {
+				o.Set("idle_timeout", durStr(g.IdleTimeout))
+			}
+			o.Opt("interrupt_exist_connections", g.InterruptExistingConnections)
 		default:
 			o.Set("type", "selector").Set("outbounds", members)
 			p.warn("группа «%s»: неизвестный тип «%s», использован selector", g.Name, g.Type)

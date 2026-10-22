@@ -60,6 +60,12 @@ type failure struct {
 }
 
 func New(version string, info platform.Info, st *store.Store, sup *supervisor.Supervisor, inst *installer.Installer) *Server {
+	if info.OS == platform.OpenWrt {
+		sup.SetInterfaceRestarter(func(ctx context.Context, iface string) error {
+			_, err := restartNetifdInterface(ctx, iface)
+			return err
+		})
+	}
 	// После установки или обновления работающее ядро перезапускаем: иначе процесс остаётся на старой версии,
 	// а заменённый файл держит место на диске до перезапуска.
 	inst.OnInstalled = func(core string) string {

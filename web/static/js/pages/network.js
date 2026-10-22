@@ -4,7 +4,7 @@ import * as st from '../state.js';
 
 const S = st.S;
 export default async function (root) {
-  const s = S.settings, g = s.general, ib = s.inbounds, tun = s.tun, fw = s.firewall;
+  const s = S.settings, g = s.general, ib = s.inbounds, tun = s.tun, fw = s.firewall, recovery = s.recovery;
   const plat = (S.system && S.system.platform) || {};
   let ifs = [];
   try { ifs = (await get('api/interfaces')) || []; } catch (e) { /* список необязателен */ }
@@ -103,6 +103,20 @@ export default async function (root) {
         chk(tun, 'block_ipv6', 'Блокировать IPv6', 'TUN работает только по IPv4, поэтому IPv6-трафик клиентов идёт напрямую, мимо туннеля. Пока работает ядро, IPv6-адреса делаются недостижимыми, и клиенты переходят на IPv4. Если IPv6 в сети не используется, ничего не меняется.')),
       field('Исключить подсети', lines(tun, 'exclude_cidr', { ph: '192.168.0.0/16' }), 'Подсети, которые не нужно направлять в TUN (по одной в строке).')),
     ifCard,
+    h('div', { class: 'card' }, h('h2', 'Автовосстановление туннелей'),
+      chk(recovery, 'enabled', 'Перезапускать ядро при сбое рукопожатий AmneziaWG',
+        'Панель следит за журналом ядра: если подряд накопится заданное число неудачных рукопожатий, ядро перезапустится. Помогает при зависшем AmneziaWG, когда сервер не отвечает, а ядро продолжает работать.'),
+      chk(recovery, 'interface_restart_enabled', 'Перезапускать системный VPN при ошибке ping или недоступности интерфейса',
+        'Панель проверяет, что системный Linux-интерфейс поднят и его узел отвечает на проверку задержки Clash API. После 5 неудач подряд OpenWrt переподключит VPN через netifd. Ядро Amnezia-box при этом не перезапускается.'),
+      note('', 'Для проверки ping используется адрес и таймаут из группы узла, если они заданы; иначе — HTTPS-проверка generate_204. Рукопожатия AmneziaWG видны только при уровне логов debug. Лимит повторов защищает от циклического восстановления.'),
+      plat.os === 'openwrt' ? null : note('warn', 'Автоматическое переподключение системного VPN через netifd доступно только на OpenWrt.'),
+      fgrid(
+        field('Неудачных рукопожатий подряд', num(recovery, 'fail_threshold', { min: 2, max: 100 }),
+          'Сколько подряд неудачных рукопожатий считать сбоем. Обычная единичная попытка не запускает восстановление.'),
+        field('Интервал проверки системного VPN', dur(recovery, 'interface_check_interval_sec', [['сек', 1], ['мин', 60]], { min: 5, max: 600 }),
+          'Как часто проверять состояние Linux-интерфейса и ответ узла; допустимо от 5 секунд до 10 минут. После 5 неудач подряд VPN будет переподключён.'),
+        field('Попыток восстановления подряд', num(recovery, 'max_restarts', { min: 1, max: 10 }),
+          'Лимит попыток действует отдельно для перезапусков ядра из-за AmneziaWG и для каждого системного VPN-интерфейса. Неудачный системный VPN снова допускает восстановление после успешной проверки ping.'))),
     h('div', { class: 'card' }, h('h2', 'Прозрачный прокси (брандмауэр)'),
       fgrid(field('Режим', sel(fw, 'mode', [['off', 'off — выключен'], ['redirect', 'redirect — TCP'], ['tproxy', 'tproxy — TCP+UDP']]), 'Чем перехватывать трафик LAN. При использовании TUN обычно оставляют off.'),
         field('Бэкенд', sel(fw, 'backend', [['auto', 'auto'], ['nft', 'nftables'], ['iptables', 'iptables']]), 'auto — по возможностям системы (' + (plat.firewall_backend || 'не определено') + ').'),

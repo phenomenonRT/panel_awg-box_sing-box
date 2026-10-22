@@ -3,10 +3,11 @@ import * as st from '../state.js';
 
 const S = st.S;
 const MODES = {
-  fallback: { name: 'Первый рабочий', hint: 'Работает с первым узлом списка, пока он не откажет. После сбоя переходит к следующему рабочему и сам на прежний не возвращается. Порядок в списке задаёт приоритет.' },
-  urltest: { name: 'Самый быстрый', hint: 'Ядро периодически замеряет задержку каждого узла и выбирает самый быстрый.' },
-  selector: { name: 'Ручной выбор', hint: 'Узел выбираете вы сами: на странице «Обзор» или в дашборде ядра.' },
-  loadbalance: { name: 'Распределение', hint: 'Распределяет соединения между узлами. В sing-box не поддерживается и заменяется на «Самый быстрый».' },
+  fallback: { name: 'Первый рабочий', hint: 'Порядок участников — приоритет: группа старается использовать первый узел, проверяет его доступность и при сбое выбирает следующий рабочий. Перемещайте резервные узлы кнопками ↑ и ↓.' },
+  urltest: { name: 'Самый быстрый', hint: 'Ядро периодически проверяет все узлы по выбранному URL и направляет новые подключения через узел с наименьшей задержкой. Допуск помогает не переключаться из-за небольшой разницы, а пауза в простое сокращает проверки.' },
+  urltest_stable: { name: 'Стабильный выбор', hint: 'Автоматически выбирает быстрый узел, но переключается только при заметной разнице задержки (допуск по умолчанию 500 мс). Это уменьшает частые переключения при близких результатах.' },
+  selector: { name: 'Ручной выбор', hint: 'Вы сами переключаете выход на странице «Обзор» или через Clash API. Можно задать участника, который будет выбран после запуска ядра.' },
+  loadbalance: { name: 'Распределение (старый тип)', hint: 'Сохранённый тип из старых настроек. Ядро sing-box не умеет распределять соединения между участниками: такая группа запускается как urltest. Для настоящего выбора используйте «Самый быстрый» или «Первый рабочий».' },
 };
 // Чем проверять узел. Ядро делает HTTP(S)-запрос через узел (ICMP-пинг ядро не умеет).
 // Адреса-IP работают, даже если DNS не отвечает.
@@ -45,8 +46,8 @@ export default async function (root) {
   const enabledNodes = () => s.nodes.filter((n) => !n.disabled).map((n) => n.name);
   const taken = (except) => new Set([...s.nodes.map((n) => n.name), ...s.groups.map((g) => g.name), 'direct', 'block'].filter((x) => x !== except));
   const newGroup = (name, type, members) => ({ name, type, members,
-    ...(type === 'selector' ? {} : { url: 'https://1.1.1.1', interval: type === 'fallback' ? 60 : 180 }),
-    ...(type === 'urltest' ? { tolerance: 50 } : {}) });
+    ...(type === 'selector' ? { default: members[0] || '' } : { url: 'https://1.1.1.1', interval: type === 'fallback' ? 60 : 180, idle_timeout: 1800 }),
+    ...(type === 'urltest' ? { tolerance: 50 } : type === 'urltest_stable' ? { tolerance: 500 } : {}) });
 
   // Одна группа из всех узлов — и она становится основной (Final).
   function create(type) {
@@ -66,9 +67,10 @@ export default async function (root) {
       clear(top).append(h('div', { class: 'card' }, h('h2', 'Как выбирать узел?'),
         h('p', { class: 'small mute' }, 'Группа объединяет узлы в один выход, через который идёт трафик. Выберите способ — панель создаст одну группу из всех ваших узлов и назначит её основной.'),
         s.nodes.length ? h('div', { class: 'gopts' },
-          opt('fallback', 'Первый рабочий', 'Пока первый узел работает — трафик идёт через него; если упал — через следующий.', true),
-          opt('urltest', 'Самый быстрый', 'Ядро сравнивает задержку узлов и выбирает лучший.'),
-          opt('selector', 'Ручной выбор', 'Узел выбираете вы сами на странице «Обзор».'))
+          opt('fallback', 'Первый рабочий', 'Сохраняет порядок приоритета и переключается на резерв, когда текущий узел перестаёт отвечать.', true),
+          opt('urltest', 'Самый быстрый', 'Периодически проверяет узлы и выбирает узел с наименьшей задержкой.'),
+          opt('urltest_stable', 'Стабильный выбор', 'Выбирает быстрый узел, но игнорирует небольшую разницу задержки.'),
+          opt('selector', 'Ручной выбор', 'Вы задаёте узел при запуске и переключаете его на странице «Обзор».'))
           : note('warn', h('span', 'Узлов пока нет. ', h('a', { href: '#/nodes' }, 'Добавьте узел'), ' — потом вернитесь сюда.'))));
       return;
     }
@@ -102,17 +104,26 @@ export default async function (root) {
         st.renameRef(g.name, n); g.name = n; st.touch(); draw();
       },
     });
+    let previousType = g.type;
     const typeSel = sel(g, 'type', modeOpts(g.type), { onchange: () => {
-      if (g.type !== 'selector') { g.url = g.url || 'https://1.1.1.1'; if (!g.interval) g.interval = g.type === 'fallback' ? 60 : 180; }
+      if (g.type !== previousType) {
+        if (g.type === 'urltest') g.tolerance = 50;
+        if (g.type === 'urltest_stable') g.tolerance = 500;
+        previousType = g.type;
+      }
+      if (g.type !== 'selector') { g.url = g.url || 'https://1.1.1.1'; if (!g.interval) g.interval = g.type === 'fallback' ? 60 : 180; if (!g.idle_timeout) g.idle_timeout = 1800; }
       if (g.type === 'urltest' && !g.tolerance) g.tolerance = 50;
+      if (g.type === 'urltest_stable' && !g.tolerance) g.tolerance = 500;
       st.touch(); draw();
     } });
-    const add = (m) => { g.members.push(m); st.touch(); draw(); };
-    const drop = (m) => { g.members = g.members.filter((x) => x !== m); st.touch(); draw(); };
+    const add = (m) => { g.members.push(m); if (g.type === 'selector' && !g.default) g.default = m; st.touch(); draw(); };
+    const drop = (m) => { g.members = g.members.filter((x) => x !== m); if (g.default === m) g.default = g.members[0] || ''; st.touch(); draw(); };
     const move = (k, d) => { const j = k + d; if (j < 0 || j >= g.members.length) return; [g.members[k], g.members[j]] = [g.members[j], g.members[k]]; st.touch(); draw(); };
     const unknown = g.members.filter((m) => m !== 'block' && !cands.includes(m) && !s.nodes.some((n) => n.name === m) && !s.groups.some((x) => x.name === m));
     const isMain = s.final === g.name;
     const ordered = g.type === 'fallback';
+    const automatic = g.type !== 'selector';
+    if (g.type === 'selector' && g.default && !g.members.includes(g.default)) g.default = '';
 
     return h('div', { class: 'card' + (isMain ? ' ismain' : '') },
       h('div', { class: 'row', style: 'margin-bottom:8px;flex-wrap:wrap' },
@@ -138,12 +149,18 @@ export default async function (root) {
       unknown.length ? note('err', 'Нет такого узла или группы: ' + unknown.join(', ')) : null,
       rest.length ? h('div', { class: 'addrow' }, h('span', { class: 'small mute' }, 'Добавить:'),
         rest.map((m) => h('button', { class: 'chip', type: 'button', onclick: () => add(m) }, '+ ' + m, ' ', h('small', kind(m))))) : null,
-      g.type !== 'selector' ? h('details', { class: 'gset' }, h('summary', 'Параметры проверки'),
+      g.type === 'selector' ? fgrid(
+        field('Узел по умолчанию', sel(g, 'default', [['', g.members.length ? 'Первый участник: ' + g.members[0] : 'Добавьте участника'], ...g.members.map((m) => [m, m + ' (' + kind(m) + ')'])], { onchange: () => { st.touch(); draw(); } }),
+          'Этот выход будет выбран после запуска ядра. Во время работы можно переключать узел на странице «Обзор».')) : null,
+      chk(g, 'interrupt_existing_connections', 'Разрывать активные подключения при переключении',
+        'При смене участника ядро закроет существующие подключения от клиентов и они установятся заново через новый выход. Внутренние подключения ядра прерываются всегда.'),
+      automatic ? h('details', { class: 'gset' }, h('summary', 'Параметры проверки'),
         fgrid(
           field('Чем проверять узел', probePick(g, draw), 'Ядро делает запрос по этому адресу через каждый узел и меряет время ответа. Обычный ping (ICMP) ядро не умеет, поэтому используется HTTP(S). Адреса «по IP» работают, даже если DNS не отвечает. Нужен ответ без редиректов, лучше всего подходят адреса generate_204.'),
           field('Интервал проверки', dur(g, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600]], { min: 10 }), 'Как часто проверять узлы. При обрыве реального соединения ядро переключается сразу, не дожидаясь проверки.'),
           field('Таймаут проверки', dur(g, 'timeout', [['сек', 1000]], { min: 1000, max: 30000 }), 'Сколько ждать ответа при проверке задержки кнопкой «Проверить задержку» на обзоре. 0 — 10 с, максимум 30 с (больше ядро не принимает). Это настройка панели: фоновая проверка ядра (интервал выше) ждёт 15 с, и поменять это в ядре нельзя.'),
-          g.type === 'urltest' ? field('Допуск', dur(g, 'tolerance', [['мс', 1], ['сек', 1000]], { min: 0, max: 65535 }), 'Не переключаться на другой узел, если он быстрее меньше чем на это значение (защита от «дрожания»).') : null)) : null);
+          field('Пауза проверок без трафика', dur(g, 'idle_timeout', [['мин', 60], ['ч', 3600], ['дн', 86400]], { min: 60, max: 604800 }), 'Когда группу не используют дольше этого времени, ядро приостанавливает периодические проверки и возобновляет их при следующей активности.'),
+          g.type === 'urltest' || g.type === 'urltest_stable' || g.type === 'loadbalance' ? field('Допуск', dur(g, 'tolerance', [['мс', 1], ['сек', 1000]], { min: 0, max: 65535 }), 'Не переключаться на более быстрый узел, если выигрыш меньше этого значения. Помогает удерживать соединения на стабильном выходе.') : null)) : null);
   }
 
   apd(root, pageHead('Группы', 'Группа выбирает, через какой из узлов пойдёт трафик. Обычно хватает одной.'),

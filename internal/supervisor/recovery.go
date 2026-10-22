@@ -1,6 +1,6 @@
 package supervisor
 
-// Автовосстановление при затяжном сбое рукопожатий AmneziaWG.
+// Автовосстановление при затяжном сбое рукопожатий AmneziaWG и системного VPN-интерфейса.
 //
 // Бывает так: сервер перестаёт отвечать на рукопожатия, а ядро продолжает работать с «мёртвым»
 // туннелем — панель показывает «нет рукопожатия», трафик не идёт. Перезапуск ядра обычно решает
@@ -18,6 +18,7 @@ package supervisor
 //     прошлые попытки больше не считаются «подряд идущими» — счётчик обнуляется.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -103,34 +104,84 @@ func (s *Supervisor) noteAwgLine(line string) {
 	go s.autoRestart(attempt)
 }
 
-func (s *Supervisor) noteMissingInterface(set *model.Settings, node, iface string) {
+func (s *Supervisor) noteInterfaceHealthy(iface string) {
 	s.mu.Lock()
+	if s.ifaceFails != nil {
+		s.ifaceFails[iface] = 0
+	}
+	if s.ifaceRestarts != nil {
+		s.ifaceRestarts[iface] = 0
+	}
+	if strings.Contains(s.recoverNote, "системный VPN-интерфейс "+iface) || strings.Contains(s.recoverNote, "системный интерфейс "+iface) {
+		s.recoverNote = ""
+	}
+	if !s.recovering && time.Since(s.startedAt) > recoveryHealthyRun {
+		s.recoverTries, s.recoverNote = 0, ""
+	}
+	s.mu.Unlock()
+}
+
+func (s *Supervisor) noteInterfaceFailure(set *model.Settings, node, iface, reason string) {
+	s.mu.Lock()
+	if s.recovering || !s.desired || !s.running() {
+		s.mu.Unlock()
+		return
+	}
 	if s.ifaceFails == nil {
 		s.ifaceFails = map[string]int{}
 	}
 	s.ifaceFails[iface]++
 	fails := s.ifaceFails[iface]
-	if s.recovering || !s.desired || !s.running() || fails < 5 {
+	if fails < 5 {
 		s.mu.Unlock()
 		return
 	}
-	if time.Since(s.startedAt) > recoveryHealthyRun {
-		s.recoverTries, s.recoverNote = 0, ""
+	if s.ifaceRestarts == nil {
+		s.ifaceRestarts = map[string]int{}
 	}
-	if s.recoverTries >= set.Recovery.MaxRestarts {
-		if s.recoverNote == "" {
-			s.recoverNote = fmt.Sprintf("Автовосстановление остановлено: %d перезапусков подряд не помогли — проверьте системный интерфейс %s.", s.recoverTries, iface)
+	tries := s.ifaceRestarts[iface]
+	if tries >= set.Recovery.MaxRestarts {
+		note := fmt.Sprintf("Автовосстановление остановлено: %d попыток переподключения не помогли — проверьте системный интерфейс %s и доступность узла.", tries, iface)
+		if s.recoverNote != note {
+			s.recoverNote = note
 			s.Logs.Add("[panel] " + s.recoverNote)
 		}
 		s.mu.Unlock()
 		return
 	}
 	s.recovering = true
-	attempt, max := s.recoverTries+1, set.Recovery.MaxRestarts
+	attempt, max := tries+1, set.Recovery.MaxRestarts
+	s.ifaceRestarts[iface] = attempt
 	s.ifaceFails[iface] = 0
-	s.Logs.Add(fmt.Sprintf("[panel] узел %s: интерфейс %s отсутствует или не поднят в 5 проверках подряд — перезапускаю ядро (попытка %d/%d)", node, iface, attempt, max))
+	s.Logs.Add(fmt.Sprintf("[panel] узел %s: интерфейс %s: %s (5 проверок подряд) — перезапускаю системный VPN через OpenWrt, ядро не трогаю (попытка %d/%d)", node, iface, reason, attempt, max))
 	s.mu.Unlock()
-	go s.autoRestart(attempt)
+	go s.autoRestartInterface(iface)
+}
+
+func (s *Supervisor) autoRestartInterface(iface string) {
+	s.mu.Lock()
+	restart := s.interfaceRestarter
+	s.mu.Unlock()
+
+	var err error
+	if restart == nil {
+		err = errors.New("перезапуск системного VPN доступен только на OpenWrt через netifd")
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		err = restart(ctx, iface)
+		cancel()
+	}
+
+	s.mu.Lock()
+	s.recovering = false
+	if err != nil {
+		s.recoverNote = "Автовосстановление: не удалось перезапустить системный VPN-интерфейс " + iface + ": " + err.Error()
+		s.Logs.Add("[panel] " + s.recoverNote)
+	} else {
+		s.recoverNote = ""
+		s.Logs.Add("[panel] системный VPN-интерфейс " + iface + " перезапущен через OpenWrt netifd; ядро не перезапускалось")
+	}
+	s.mu.Unlock()
 }
 
 // autoRestart перезапускает ядро по решению наблюдателя. Это не «ручной» запуск: счётчики

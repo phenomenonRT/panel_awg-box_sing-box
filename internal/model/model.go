@@ -39,7 +39,7 @@ type Settings struct {
 	Firewall      Firewall       `json:"firewall"`
 
 	Download Download `json:"download"`
-	Recovery Recovery `json:"recovery"` // автовосстановление ядра при затяжном сбое рукопожатий
+	Recovery Recovery `json:"recovery"` // автовосстановление ядра и системного VPN
 
 	// Произвольные добавки к итоговому конфигу (глубокое слияние).
 	// Позволяют использовать любую возможность ядра, для которой нет полей в UI.
@@ -203,12 +203,15 @@ type AWG struct {
 
 // Group — группа узлов.
 type Group struct {
-	Name      string   `json:"name"`
-	Type      string   `json:"type"` // selector | urltest | fallback | loadbalance
-	Members   []string `json:"members"`
-	URL       string   `json:"url,omitempty"`
-	Interval  int      `json:"interval,omitempty"` // секунды
-	Tolerance int      `json:"tolerance,omitempty"`
+	Name                         string   `json:"name"`
+	Type                         string   `json:"type"` // selector | urltest | urltest_stable | fallback | loadbalance
+	Members                      []string `json:"members"`
+	Default                      string   `json:"default,omitempty"` // исходный участник selector
+	URL                          string   `json:"url,omitempty"`
+	Interval                     int      `json:"interval,omitempty"` // секунды
+	Tolerance                    int      `json:"tolerance,omitempty"`
+	IdleTimeout                  int      `json:"idle_timeout,omitempty"` // секунды без активности до паузы проверок
+	InterruptExistingConnections bool     `json:"interrupt_existing_connections,omitempty"`
 	// Timeout — сколько ждать ответа при проверке задержки из панели, мс (0 = 10 с).
 	// В конфиг ядра не попадает: у urltest такого параметра нет, фоновая проверка ядра ждёт 15 с.
 	Timeout int `json:"timeout,omitempty"`
@@ -230,9 +233,12 @@ type SubscriptionNode struct {
 // 32767 мс: при большем оно отвечает «400 Bad Request», и узел показывается как «сбой» без проверки.
 // Предел панели ниже лимита ядра с запасом.
 const (
-	DelayTimeoutMin     = 1000
-	DelayTimeoutMax     = 30000
-	DelayTimeoutDefault = 10000
+	DelayTimeoutMin            = 1000
+	DelayTimeoutMax            = 30000
+	DelayTimeoutDefault        = 10000
+	GroupIdleTimeoutMinSec     = 60
+	GroupIdleTimeoutMaxSec     = 604800
+	GroupIdleTimeoutDefaultSec = 1800
 )
 
 // Допустимое ограничение памяти ядра (GOMEMLIMIT), МБ. 0 — не ограничивать.
@@ -289,15 +295,14 @@ type Update struct {
 	Auto bool `json:"auto"` // автоматически ставить новые версии (по умолчанию выключено)
 }
 
-// Recovery — автовосстановление ядра при затяжном сбое рукопожатий AmneziaWG: если сервер
-// перестал отвечать, ядро продолжает работать с «мёртвым» туннелем, и панель перезапускает его.
-// События рукопожатия ядро пишет на уровне логов debug.
+// Recovery — автовосстановление: перезапуск ядра при сбое рукопожатий AmneziaWG и переподключение
+// системного VPN-интерфейса, если он пропал или перестал проходить проверку доступности.
 type Recovery struct {
 	Enabled                   bool `json:"enabled"`                      // следить за рукопожатиями и перезапускать ядро
 	FailThreshold             int  `json:"fail_threshold"`               // сколько подряд неудачных рукопожатий считать сбоем
-	MaxRestarts               int  `json:"max_restarts"`                 // сколько перезапусков подряд делать, прежде чем сдаться
-	InterfaceRestartEnabled   bool `json:"interface_restart_enabled"`    // перезапускать ядро, если системный интерфейс пропал
-	InterfaceCheckIntervalSec int  `json:"interface_check_interval_sec"` // интервал проверки системного интерфейса, секунды
+	MaxRestarts               int  `json:"max_restarts"`                 // сколько попыток восстановления подряд делать, прежде чем сдаться
+	InterfaceRestartEnabled   bool `json:"interface_restart_enabled"`    // переподключать системный VPN при сбое интерфейса или ping
+	InterfaceCheckIntervalSec int  `json:"interface_check_interval_sec"` // интервал проверки системного VPN, секунды
 }
 
 type Download struct {
@@ -491,6 +496,18 @@ func (s *Settings) Normalize() {
 			if g.Interval == 0 {
 				g.Interval = 180
 			}
+			if g.IdleTimeout == 0 {
+				g.IdleTimeout = GroupIdleTimeoutDefaultSec
+			}
+			switch {
+			case g.IdleTimeout < GroupIdleTimeoutMinSec:
+				g.IdleTimeout = GroupIdleTimeoutMinSec
+			case g.IdleTimeout > GroupIdleTimeoutMaxSec:
+				g.IdleTimeout = GroupIdleTimeoutMaxSec
+			}
+		}
+		if g.Type == "urltest_stable" && g.Tolerance == 0 {
+			g.Tolerance = 500
 		}
 		g.Timeout = clampCheckTimeout(g.Timeout)
 	}
@@ -623,16 +640,26 @@ func (s *Settings) Validate() []Issue {
 		if len(g.Members) == 0 {
 			add("error", "группа «%s» пуста", g.Name)
 		}
+		if g.Type != "selector" && g.IdleTimeout != 0 && (g.IdleTimeout < GroupIdleTimeoutMinSec || g.IdleTimeout > GroupIdleTimeoutMaxSec) {
+			add("error", "группа «%s»: пауза проверок по бездействию должна быть от %d минуты до %d дней", g.Name, GroupIdleTimeoutMinSec/60, GroupIdleTimeoutMaxSec/(24*60*60))
+		}
 		if g.Timeout != 0 && (g.Timeout < DelayTimeoutMin || g.Timeout > DelayTimeoutMax) {
 			add("error", "группа «%s»: таймаут проверки должен быть от %d до %d с", g.Name, DelayTimeoutMin/1000, DelayTimeoutMax/1000)
 		}
+		defaultExists := g.Type != "selector" || g.Default == ""
 		for _, m := range g.Members {
+			if m == g.Default {
+				defaultExists = true
+			}
 			if !exists(m) {
 				add("error", "группа «%s»: нет узла или группы «%s»", g.Name, m)
 			}
 			if m == g.Name {
 				add("error", "группа «%s» ссылается сама на себя", g.Name)
 			}
+		}
+		if !defaultExists {
+			add("error", "группа «%s»: узел по умолчанию «%s» не входит в группу", g.Name, g.Default)
 		}
 	}
 	if cyc := groupCycle(s.Groups); cyc != "" {

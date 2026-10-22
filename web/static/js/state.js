@@ -100,7 +100,10 @@ export const nodeNames = () => S.settings.nodes.map((n) => n.name);
 export function renameRef(oldN, newN) {
   if (!oldN || oldN === newN) return;
   const s = S.settings;
-  for (const g of s.groups) g.members = g.members.map((m) => (m === oldN ? newN : m));
+  for (const g of s.groups) {
+    g.members = g.members.map((m) => (m === oldN ? newN : m));
+    if (g.default === oldN) g.default = newN;
+  }
   for (const n of s.nodes) if (n.detour === oldN) n.detour = newN;
   for (const r of s.rules) if (r.outbound === oldN) r.outbound = newN;
   if (s.final === oldN) s.final = newN;
@@ -140,6 +143,7 @@ export function pruneRefs() {
   for (const g of s.groups) {
     const keep = g.members.filter((m) => have.has(m));
     if (keep.length !== g.members.length) { out.push('группа «' + g.name + '»: убраны несуществующие участники'); g.members = keep; }
+    if (g.default && !g.members.includes(g.default)) { out.push('группа «' + g.name + '»: выбран участник по умолчанию отсутствует'); g.default = g.members[0] || ''; }
   }
   for (const n of s.nodes) if (n.detour && !have.has(n.detour)) { out.push('узел «' + n.name + '»: сброшена цепочка'); n.detour = ''; }
   if (!have.has(s.final)) { out.push('исходящий по умолчанию «' + s.final + '» → direct'); s.final = 'direct'; }
