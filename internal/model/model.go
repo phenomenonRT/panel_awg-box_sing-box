@@ -244,7 +244,7 @@ type RuleSet struct {
 	Format    string `json:"format"`             // srs | json | text (обычный список доменов)
 	Interval  int    `json:"interval,omitempty"` // секунды
 	AddedAt   int64  `json:"added_at,omitempty"` // Unix-время в миллисекундах, когда набор добавили в панели
-	LocalPath string `json:"-"`                  // путь текстового файла для активной конфигурации; задаёт Supervisor
+	LocalPath string `json:"-"`                  // локальный путь набора для активной конфигурации; задаёт Supervisor
 }
 
 // Rule — правило маршрутизации (или DNS-правило).

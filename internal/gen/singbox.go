@@ -644,13 +644,17 @@ func sbRoute(s *model.Settings, p *plan) *O {
 	if len(p.sets) > 0 {
 		var sets []any
 		for _, sp := range p.sets {
-			if sp.Format == "text" {
+			if sp.Path != "" || sp.Format == "text" || sp.Interval <= 0 {
 				localPath := sp.Path
 				if localPath == "" {
-					localPath = rulesets.File(sp.Name)
+					localPath = rulesets.LocalFile(model.RuleSet{Name: sp.Name, URL: sp.URL, Format: sp.Format})
+				}
+				localFormat := "binary"
+				if sp.Format == "text" || sp.Format == "json" {
+					localFormat = "source"
 				}
 				sets = append(sets, NewO().Set("type", "local").Set("tag", sp.Name).
-					Set("format", "source").Set("path", localPath))
+					Set("format", localFormat).Set("path", localPath))
 				continue
 			}
 			o := NewO().Set("type", "remote").Set("tag", sp.Name)
@@ -665,11 +669,7 @@ func sbRoute(s *model.Settings, p *plan) *O {
 			} else if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" {
 				o.Set("download_detour", v)
 			}
-			iv := sp.Interval
-			if iv <= 0 {
-				iv = 86400
-			}
-			o.Set("update_interval", durStr(iv))
+			o.Set("update_interval", durStr(sp.Interval))
 			sets = append(sets, o)
 		}
 		r.Set("rule_set", sets)

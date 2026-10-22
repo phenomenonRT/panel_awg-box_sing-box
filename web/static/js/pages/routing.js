@@ -8,6 +8,7 @@ const SB = 'https://raw.githubusercontent.com/SagerNet/';
 const ID = 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/';
 const MCT = 'https://raw.githubusercontent.com/avgustvishne/CDN-Cloud-MagiTrickle/main/data/';
 const ASN = 'https://asn.web2core.workers.dev/';
+const DEFAULT_RULESET_INTERVAL = 0;
 const MCT_PROFILES = [
   ['FULL', 'full', 'presets/full'], ['BALANCED', 'balanced', 'presets/balanced'],
   ['PERFORMANCE', 'performance', 'presets/performance'], ['MINIMAL', 'minimal', 'presets/minimal'],
@@ -68,6 +69,13 @@ const PRESETS = [
 ];
 function presetURL(core, kind, name) {
   return SB + (kind === 'geosite' ? 'sing-geosite/rule-set/geosite-' : 'sing-geoip/rule-set/geoip-') + name + '.srs';
+}
+function presetSource(preset) {
+  if (preset[1] !== 'list') return 'SagerNet/sing-box (geosite и geoip)';
+  if (preset[2].startsWith('itdog-')) return 'itdoginfo/allow-domains';
+  if (preset[2].startsWith('magitrickle-')) return 'CDN-Cloud-MagiTrickle';
+  if (preset[2].startsWith('asn-')) return 'ASN — asn.web2core.workers.dev';
+  return 'Другие источники';
 }
 // быстрые шаблоны правил: [подпись, тип, значения, куда]
 const QUICK = [
@@ -133,7 +141,7 @@ export default async function (root) {
         h('details', { style: 'margin-top:6px' }, h('summary', { class: 'small' }, 'Дополнительно: имя, формат, обновление'),
           fgrid(field('Имя', txt(r, 'name', { ph: 'my-set', onchange: () => { const c = ruleOf(prev); if (c) c.values = [r.name]; prev = r.name; ed.redraw(); } }), 'Внутреннее имя набора; в правилах он выбирается по нему.'),
             field('Формат', sel(r, 'format', [['', 'определить по URL'], ['srs', 'srs (бинарный)'], ['json', 'json (текстовый)'], ['text', 'список (домен в строке)']]), 'Обычно определяется по окончанию ссылки.'),
-            field('Обновлять раз в', dur(r, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600], ['сут', 86400]], { min: 0 }), 'По умолчанию раз в сутки. 0 — значение по умолчанию.')))));
+            field('Обновлять раз в', dur(r, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600], ['сут', 86400], ['мес', 30 * 86400]], { min: 0 }), 'По умолчанию 0: скачать при первом запуске и больше не обновлять.')))));
     });
   }
 
@@ -142,12 +150,23 @@ export default async function (root) {
   const presetSummaryText = h('span', 'Выбрать шаблоны');
   const presetSummary = h('summary', { class: 'btn', 'aria-label': 'Выбрать шаблоны наборов правил' }, presetSummaryText,
     h('span', { class: 'rs-chevron', 'aria-hidden': 'true' }, '▾'));
-  const presetPicker = h('details', { class: 'rs-picker' }, presetSummary,
-    h('div', { class: 'rs-preset-menu' }, PRESETS.map((p, i) => h('label', { class: 'check rs-preset-option' },
+  let previousSource = '';
+  const presetOptions = [];
+  PRESETS.forEach((p, i) => {
+    const source = presetSource(p);
+    if (source !== previousSource) {
+      if (previousSource) presetOptions.push(h('hr', { class: 'rs-preset-divider' }));
+      presetOptions.push(h('div', { class: 'small mute rs-preset-source' }, source));
+      previousSource = source;
+    }
+    presetOptions.push(h('label', { class: 'check rs-preset-option' },
       h('input', { type: 'checkbox', onchange: (e) => {
         if (e.target.checked) selectedPresets.add(i); else selectedPresets.delete(i);
         updatePresetSummary();
-      } }), p[0]))));
+      } }), p[0]));
+  });
+  const presetPicker = h('details', { class: 'rs-picker' }, presetSummary,
+    h('div', { class: 'rs-preset-menu' }, presetOptions));
   function updatePresetSummary() {
     const label = selectedPresets.size ? 'Выбрано шаблонов: ' + selectedPresets.size : 'Выбрать шаблоны';
     presetSummaryText.textContent = label;
@@ -158,7 +177,7 @@ export default async function (root) {
     h('div', { class: 'card' }, h('h2', 'Общее'),
       fgrid(field('Final — исходящий по умолчанию', sel(s, 'final', outs()), 'Куда отправлять трафик, не попавший ни под одно правило.'),
         field('Скачивать наборы правил через', sel(g, 'update_via', [['direct', 'direct — напрямую'], ...outs().filter((o) => o[0] !== 'direct' && o[0] !== 'block')]), 'Если GitHub заблокирован, укажите здесь рабочий узел или группу.')),
-      chk(g, 'rule_sets_ram', 'Хранить обновления текстовых наборов в RAM', 'Первый успешный список для каждой ссылки сохраняется в постоянный каталог. Рабочая копия для amnezia-box находится в /tmp (RAM); последующие изменившиеся версии той же ссылки записываются туда, флеш-копия не перезаписывается. После перезагрузки панель восстановит копию и сразу проверит источник; без сети останется сохранённая первоначальная версия. Расход RAM примерно равен суммарному размеру активных текстовых наборов.'),
+      chk(g, 'rule_sets_ram', 'Хранить рабочие копии наборов в RAM', 'Первая успешная версия сохраняется во флеш-память, рабочая копия — в /tmp (RAM). При интервале 0 источник скачивается только один раз; при ненулевом интервале текстовые списки проверяются по расписанию, изменения остаются в RAM. После перезагрузки восстанавливается флеш-копия. Расход RAM примерно равен суммарному размеру активных наборов.'),
       chk(g, 'bypass_lan', 'Локальные сети — напрямую (bypass LAN)', 'Добавляет правило «частные адреса → direct» перед остальными, чтобы доступ к роутеру и устройствам дома не уходил в прокси.'),
       chk(g, 'sniff', 'Определять домен и протокол (sniff)', 'Ядро подсматривает SNI/Host в первых пакетах. Нужно для доменных правил при прозрачном прокси и для правил по протоколу.')),
     h('div', { class: 'card' }, h('h2', 'Правила'),
@@ -186,7 +205,7 @@ export default async function (root) {
           for (const i of selectedPresets) {
             const p = PRESETS[i]; const isList = p[1] === 'list'; const name = isList ? p[2] : p[1] + '-' + p[2];
             if (s.rule_sets.some((r) => r.name === name)) { skipped++; continue; }
-            s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: 86400, added_at: addedAt } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: 86400, added_at: addedAt });
+            s.rule_sets.push(isList ? { name, url: p[3], format: 'text', interval: DEFAULT_RULESET_INTERVAL, added_at: addedAt } : { name, url: presetURL(core(), p[1], p[2]), format: 'srs', behavior: p[1] === 'geoip' ? 'ipcidr' : 'domain', interval: DEFAULT_RULESET_INTERVAL, added_at: addedAt });
             const existing = ruleOf(name);
             if (existing) existing.outbound = out;
             else s.rules.push({ type: 'rule_set', values: [name], outbound: out });
@@ -201,7 +220,7 @@ export default async function (root) {
           else if (added) toast('Добавлено наборов: ' + added + ' → ' + out, 'ok');
           else toast('Выбранные наборы уже добавлены', 'err');
         } }, 'Добавить'),
-        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: 86400, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
+        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: DEFAULT_RULESET_INTERVAL, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке')),
       setsBox));
   drawSets();
 }

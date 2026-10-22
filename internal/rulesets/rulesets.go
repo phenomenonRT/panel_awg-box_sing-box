@@ -1,6 +1,6 @@
-// Package rulesets готовит текстовые списки доменов и подсетей для sing-box.
-// Ядро sing-box умеет только бинарные (.srs) и JSON-наборы, поэтому обычный список
-// «по домену в строке» панель сама скачивает, преобразует в JSON и подкладывает ядру как локальный набор.
+// Package rulesets готовит локальные копии наборов правил для sing-box.
+// Текстовые списки панель преобразует в JSON; наборы с интервалом 0 загружаются
+// один раз и используются локально, чтобы ядро не обновляло их самостоятельно.
 package rulesets
 
 import (
@@ -27,8 +27,26 @@ import (
 
 var unsafe = regexp.MustCompile(`[^A-Za-z0-9._!@-]`)
 
-// File — путь файла набора относительно рабочего каталога ядра.
+// File — путь преобразованного текстового набора относительно рабочего каталога ядра.
 func File(name string) string { return "rulesets/" + unsafe.ReplaceAllString(name, "_") + ".json" }
+
+// LocalFile — путь к локальной копии набора с подходящим расширением.
+func LocalFile(rs model.RuleSet) string {
+	if IsText(rs) {
+		return File(rs.Name)
+	}
+	ext := ".json"
+	format := rs.Format
+	if format == "" {
+		if u, err := url.Parse(rs.URL); err == nil {
+			format = strings.TrimPrefix(strings.ToLower(path.Ext(u.Path)), ".")
+		}
+	}
+	if format == "srs" {
+		ext = ".srs"
+	}
+	return "rulesets/" + unsafe.ReplaceAllString(rs.Name, "_") + ext
+}
 
 // IsText говорит, нужно ли набору преобразование: явно выбранный формат text или файл .txt/.list/.lst.
 func IsText(rs model.RuleSet) bool {
@@ -188,14 +206,15 @@ func Prepare(ctx context.Context, dir string, sets []model.RuleSet, fetch Fetche
 func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSet, fetch Fetcher, force bool) []string {
 	var warns []string
 	for _, rs := range sets {
-		if !IsText(rs) || rs.URL == "" {
+		textSet := IsText(rs)
+		if (!textSet && rs.Interval > 0) || rs.URL == "" {
 			continue
 		}
-		file := filepath.Join(dir, filepath.FromSlash(File(rs.Name)))
+		file := filepath.Join(dir, filepath.FromSlash(LocalFile(rs)))
 		activeFile, stamp := file, file+".src"
 		coldRAM := false
 		if ramDir != "" {
-			activeFile = filepath.Join(ramDir, filepath.FromSlash(File(rs.Name)))
+			activeFile = filepath.Join(ramDir, filepath.FromSlash(LocalFile(rs)))
 			stamp = activeFile + ".src"
 			if _, err := os.Stat(activeFile); err != nil {
 				if !os.IsNotExist(err) {
@@ -216,9 +235,11 @@ func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSe
 		}
 		iv := time.Duration(rs.Interval) * time.Second
 		if iv <= 0 {
-			iv = 24 * time.Hour
+			if sourceMatches(stamp, rs.URL) || hasPersistentBaseline(file, rs.URL) {
+				continue
+			}
 		}
-		if !force && !coldRAM {
+		if iv > 0 && !force && !coldRAM {
 			if st, err := os.Stat(stamp); err == nil && time.Since(st.ModTime()) < iv {
 				if old, _ := os.ReadFile(stamp); string(old) == rs.URL {
 					continue
@@ -234,19 +255,35 @@ func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSe
 		cancel()
 		if err != nil {
 			warns = append(warns, fmt.Sprintf("набор «%s»: не удалось скачать %s: %v", rs.Name, rs.URL, err))
-			if _, e := os.Stat(activeFile); os.IsNotExist(e) {
+			if textSet {
+				if _, e := os.Stat(activeFile); !os.IsNotExist(e) {
+					continue
+				}
 				if writeErr := writeIfChanged(activeFile, []byte(`{"version":2,"rules":[]}`)); writeErr != nil {
 					warns = append(warns, fmt.Sprintf("набор «%s»: не удалось создать пустую копию: %v", rs.Name, writeErr))
 				}
 			}
 			continue
 		}
-		js, n := Convert(string(body))
-		if n == 0 {
-			warns = append(warns, fmt.Sprintf("набор «%s»: в списке %s не нашлось ни одного домена или подсети", rs.Name, rs.URL))
+		content := body
+		if textSet {
+			var n int
+			content, n = Convert(string(body))
+			if n == 0 {
+				warns = append(warns, fmt.Sprintf("набор «%s»: в списке %s не нашлось ни одного домена или подсети", rs.Name, rs.URL))
+				if _, err := os.Stat(activeFile); err == nil {
+					continue
+				}
+			}
+		} else if filepath.Ext(file) == ".json" && !json.Valid(body) {
+			warns = append(warns, fmt.Sprintf("набор «%s»: источник %s вернул некорректный JSON; оставлена старая версия", rs.Name, rs.URL))
+			continue
+		} else if filepath.Ext(file) == ".srs" && (len(body) < 4 || !bytes.HasPrefix(body, []byte("SRS"))) {
+			warns = append(warns, fmt.Sprintf("набор «%s»: источник %s вернул некорректный SRS; оставлена старая версия", rs.Name, rs.URL))
+			continue
 		}
 		if ramDir != "" && !hasPersistentBaseline(file, rs.URL) {
-			if err := writeIfChanged(file, js); err != nil {
+			if err := writeIfChanged(file, content); err != nil {
 				warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить первую копию во флеш-память: %v", rs.Name, err))
 				continue
 			}
@@ -254,7 +291,7 @@ func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSe
 				warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить адрес базовой копии: %v", rs.Name, err))
 			}
 		}
-		if err := writeIfChanged(activeFile, js); err != nil {
+		if err := writeIfChanged(activeFile, content); err != nil {
 			warns = append(warns, fmt.Sprintf("набор «%s»: не удалось сохранить список: %v", rs.Name, err))
 			continue
 		}
@@ -300,6 +337,11 @@ func hasPersistentBaseline(file, sourceURL string) bool {
 		return false
 	}
 	old, err := os.ReadFile(file + ".src")
+	return err == nil && string(old) == sourceURL
+}
+
+func sourceMatches(stamp, sourceURL string) bool {
+	old, err := os.ReadFile(stamp)
 	return err == nil && string(old) == sourceURL
 }
 

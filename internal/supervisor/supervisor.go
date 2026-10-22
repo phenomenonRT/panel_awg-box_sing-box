@@ -151,12 +151,16 @@ func (s *Supervisor) ruleSetsRAMDir(set *model.Settings, core string) string {
 	return s.RuleSetsRAMDir(core)
 }
 
-func settingsWithRuleSetsRAMPaths(set *model.Settings, ramDir string) *model.Settings {
+func settingsWithRuleSetPaths(set *model.Settings, ramDir string) *model.Settings {
 	copy := *set
 	copy.RuleSets = append([]model.RuleSet(nil), set.RuleSets...)
 	for i := range copy.RuleSets {
-		if rulesets.IsText(copy.RuleSets[i]) {
-			copy.RuleSets[i].LocalPath = filepath.Join(ramDir, filepath.FromSlash(rulesets.File(copy.RuleSets[i].Name)))
+		rs := &copy.RuleSets[i]
+		if (rulesets.IsText(*rs) && ramDir != "") || rs.Interval <= 0 {
+			rs.LocalPath = rulesets.LocalFile(*rs)
+			if ramDir != "" {
+				rs.LocalPath = filepath.Join(ramDir, filepath.FromSlash(rulesets.LocalFile(*rs)))
+			}
 		}
 	}
 	return &copy
@@ -164,10 +168,11 @@ func settingsWithRuleSetsRAMPaths(set *model.Settings, ramDir string) *model.Set
 
 // Render генерирует конфиг для выбранного ядра.
 func Render(set *model.Settings) (*gen.Result, error) {
+	ramDir := ""
 	if set.General.RuleSetsRAM {
-		ramDir := filepath.Join(os.TempDir(), "corepanel", "rulesets", set.Core)
-		set = settingsWithRuleSetsRAMPaths(set, ramDir)
+		ramDir = filepath.Join(os.TempDir(), "corepanel", "rulesets", set.Core)
 	}
+	set = settingsWithRuleSetPaths(set, ramDir)
 	if issues := set.Validate(); hasError(issues) {
 		var msgs []string
 		for _, i := range issues {
@@ -451,13 +456,13 @@ func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets
 
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.
 func (s *Supervisor) refreshRuleSets(set *model.Settings, dir, ramDir string, done <-chan struct{}) {
-	has := false
+	var updateSets []model.RuleSet
 	for _, rs := range set.RuleSets {
-		if rulesets.IsText(rs) {
-			has = true
+		if rulesets.IsText(rs) && rs.Interval > 0 {
+			updateSets = append(updateSets, rs)
 		}
 	}
-	if !has {
+	if len(updateSets) == 0 {
 		return
 	}
 	t := time.NewTicker(10 * time.Minute)
@@ -468,7 +473,7 @@ func (s *Supervisor) refreshRuleSets(set *model.Settings, dir, ramDir string, do
 		case <-done:
 			return
 		case <-t.C:
-			for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, fetch, false) {
+			for _, w := range rulesets.PrepareWithRAM(context.Background(), dir, ramDir, updateSets, fetch, false) {
 				s.Logs.Add("[panel] " + w)
 			}
 		}

@@ -47,12 +47,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)}
 .check{display:flex;align-items:center;gap:8px;margin:2px 0 8px;cursor:pointer}
 .check input{width:16px;height:16px;accent-color:var(--accent);margin:0}
 .rs-picker{position:relative;display:inline-block}
-.rs-picker>summary{list-style:none}
+.rs-picker>summary{list-style:none;width:min(260px,90vw);justify-content:space-between}
 .rs-picker>summary::-webkit-details-marker{display:none}
 .rs-chevron{display:inline-block;font-size:12px;line-height:1;transition:transform .15s ease}
 .rs-picker[open]>.btn .rs-chevron{transform:rotate(180deg)}
 .rs-preset-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:40;width:min(520px,90vw);max-height:min(520px,70vh);overflow:auto;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overscroll-behavior:contain}
 .rs-preset-option{margin:0;padding:6px 4px}
+.rs-preset-source{font-weight:700;padding:6px 4px 3px}
+.rs-preset-divider{border:0;border-top:1px solid var(--line);margin:5px 0}
 .rs-source{overflow-wrap:anywhere;margin:-3px 0 10px;line-height:1.4}
 .pw{display:flex;gap:4px}.pw input{flex:1}
 .durbox{display:flex;gap:6px}.durbox input{flex:1;min-width:0}.durbox select{width:auto;flex:0 0 auto}
