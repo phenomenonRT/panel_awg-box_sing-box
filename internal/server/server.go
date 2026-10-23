@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"corepanel/internal/dlnet"
 	"corepanel/internal/dnstest"
 	"corepanel/internal/firewall"
 	"corepanel/internal/importer"
@@ -730,11 +731,10 @@ func (s *Server) importURL(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "нужен http(s)-адрес подписки")
 		return
 	}
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if p := s.St.Get().Download.Proxy; p != "" {
-		if pu, err := url.Parse(p); err == nil && pu.Host != "" {
-			tr.Proxy = http.ProxyURL(pu)
-		}
+	tr, err := dlnet.Transport(s.St.Get().Download)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()

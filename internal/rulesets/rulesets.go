@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"corepanel/internal/dlnet"
 	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 )
@@ -153,9 +154,21 @@ func Convert(text string) ([]byte, int) {
 type Fetcher func(ctx context.Context, rawURL string) ([]byte, error)
 
 // NewFetcher — скачивание с GitHub: зеркала по порядку, затем напрямую, затем через локальный прокси ядра.
-func NewFetcher(mirrors []string, proxyPort int) Fetcher {
+func NewFetcher(mirrors []string, proxyPort int, d model.Download) Fetcher {
 	get := func(ctx context.Context, u string, proxy *url.URL) ([]byte, error) {
-		tr := &http.Transport{Proxy: nil, ResponseHeaderTimeout: 20 * time.Second}
+		tr, terr := dlnet.Transport(d)
+		if terr != nil {
+			return nil, terr
+		}
+		tr.Proxy, tr.ResponseHeaderTimeout = nil, 20*time.Second
+		if d.Via == model.ViaProxy && proxy == nil {
+			if pu, perr := url.Parse(strings.TrimSpace(d.Proxy)); perr == nil && pu.Host != "" {
+				proxy = pu
+			}
+		}
+		if d.Via == model.ViaCore && proxy == nil && d.CorePort > 0 {
+			proxy, _ = url.Parse("http://" + net.JoinHostPort("127.0.0.1", fmt.Sprint(d.CorePort)))
+		}
 		if proxy != nil {
 			tr.Proxy = http.ProxyURL(proxy)
 		}

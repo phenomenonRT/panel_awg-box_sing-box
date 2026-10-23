@@ -1,4 +1,4 @@
-import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, chk, num, lines, toast, toastErr, confirmBox } from '../ui.js';
+import { apd, h, clear, pageHead, badge, note, field, fgrid, txt, sel, chk, num, lines, toast, toastErr, confirmBox } from '../ui.js';
 import { get, post } from '../api.js';
 import * as st from '../state.js';
 
@@ -187,6 +187,22 @@ export default async function (root) {
     } }, 'Добавить популярные');
     return h('div', { class: 'mirrors' }, area, h('div', { class: 'row', style: 'margin-top:6px' }, addPop, test), out);
   }
+  let ifList = [];
+  try { ifList = (await get('api/interfaces')) || []; } catch (e) { /* список необязателен */ }
+  const viaBox = h('div', { class: 'stack' });
+  function drawVia() {
+    clear(viaBox);
+    viaBox.append(sel(d, 'via', [['direct', 'Напрямую (с зеркалами)'], ['proxy', 'Через HTTP-прокси'], ['core', 'Через ядро (по правилам маршрутизации)'], ['iface', 'Через сетевой интерфейс']], { onchange: drawVia }));
+    if (d.via === 'proxy') viaBox.append(txt(d, 'proxy', { ph: 'http://127.0.0.1:7890' }), h('div', { class: 'small mute' }, 'Формат: http(s)://host:port.'));
+    if (d.via === 'core') viaBox.append(note('', 'Работает, пока запущено ядро. Если ядро остановлено, загрузка не удастся: выберите другой способ.'));
+    if (d.via === 'iface') {
+      const known = new Set(ifList.map((i) => i.name));
+      const opts = [['', '— выберите интерфейс —'], ...ifList.map((i) => [i.name, i.name + (i.up ? '' : ' (не активен)') + ((i.addrs || []).length ? ' — ' + i.addrs.slice(0, 2).join(', ') : '')])];
+      if (d.interface && !known.has(d.interface)) opts.push([d.interface, d.interface + ' (не найден)']);
+      viaBox.append(sel(d, 'interface', opts));
+    }
+  }
+  drawVia();
   apd(root, 
     h('div', { class: 'card' }, h('h2', 'Автозапуск'),
       chk(s, 'autostart', 'Запускать ядро вместе с панелью', 'При старте роутера панель сама поднимет выбранное ядро с сохранёнными настройками.')),
@@ -194,7 +210,7 @@ export default async function (root) {
       note('', 'Релизы берутся с GitHub. Если GitHub недоступен, укажите зеркало или прокси.'),
       fgrid(
         field('Зеркала GitHub', mirrorEditor(), 'По одному адресу в строке. Если GitHub недоступен, панель пробует зеркала по порядку, а затем сам GitHub. Используются для ядра, обновления панели и наборов правил (в конфиг ядра попадает первое зеркало). Зеркало видит всё, что вы через него скачиваете, и может подменить файл: берите только те, которым доверяете.'),
-        field('HTTP-прокси для загрузок', txt(d, 'proxy', { ph: 'http://127.0.0.1:7890' }), 'Например, mixed-порт уже работающего ядра или другого прокси. Формат: http(s)://host:port.'),
+        field('Откуда скачивать', viaBox, 'Как панель ходит в сеть за ядрами, обновлениями панели, подписками и наборами правил. «Через ядро» — трафик идёт на mixed-порт ядра, и дальше его направляют правила маршрутизации: добавьте правило для github.com (или набор), чтобы выбрать нужный узел. «Через интерфейс» — соединения привязываются к выбранному сетевому интерфейсу (например, к конкретному провайдеру или VPN).'),
         field('Каталог установки ядер', txt(d, 'bin_dir', { ph: (S.system && S.system.platform && S.system.platform.bin_dir) || '/opt/bin' }), 'Куда класть бинарники. Пусто — каталог по умолчанию для платформы. На роутерах с малой флеш-памятью выбирайте внешний накопитель.'),
         field('Свой бинарник amnezia-box', txt(d, 'amnezia_path', { ph: '/opt/bin/amnezia-box' }))),
       h('div', { class: 'row' }, h('p', { class: 'small mute grow' }, 'Изменения вступают в силу после сохранения настроек. Свободное место считается по сохранённому каталогу.'),

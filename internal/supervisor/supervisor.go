@@ -557,7 +557,7 @@ func (s *Supervisor) rulesetFetcher(set *model.Settings, proxyPort int) rulesets
 	if v := set.General.UpdateVia; v == "" || v == "direct" {
 		mirrors = mirror.List(set.Download)
 	}
-	return rulesets.NewFetcher(mirrors, proxyPort)
+	return rulesets.NewFetcher(mirrors, proxyPort, set.Download)
 }
 
 // RefreshRuleSets вручную проверяет и обновляет наборы, которые скачивает панель.

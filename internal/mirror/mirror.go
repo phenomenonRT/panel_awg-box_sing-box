@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"corepanel/internal/dlnet"
 	"corepanel/internal/model"
 )
 
@@ -102,10 +103,8 @@ const probeURL = "https://raw.githubusercontent.com/phenomenonRT/amnezia-box/mai
 // Check проверяет прямой доступ и каждое зеркало параллельно. Первой строкой идёт прямой доступ.
 func Check(ctx context.Context, d model.Download, mirrors []string) []Result {
 	cl := &http.Client{Timeout: 10 * time.Second}
-	if d.Proxy != "" {
-		if pu, err := url.Parse(d.Proxy); err == nil && pu.Host != "" {
-			cl.Transport = &http.Transport{Proxy: http.ProxyURL(pu)}
-		}
+	if tr, err := dlnet.Transport(d); err == nil {
+		cl.Transport = tr
 	}
 	targets := append([]string{""}, mirrors...)
 	res := make([]Result, len(targets))

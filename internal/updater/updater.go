@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"corepanel/internal/dlnet"
 	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
@@ -161,13 +161,9 @@ func Newer(latest, current string) bool {
 }
 
 func (u *Updater) client() (*http.Client, error) {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if d := u.Settings().Download; d.Proxy != "" {
-		pu, err := url.Parse(d.Proxy)
-		if err != nil {
-			return nil, fmt.Errorf("неверный адрес прокси «%s»", d.Proxy)
-		}
-		tr.Proxy = http.ProxyURL(pu)
+	tr, err := dlnet.Transport(u.Settings().Download)
+	if err != nil {
+		return nil, err
 	}
 	return &http.Client{Transport: tr, Timeout: 5 * time.Minute}, nil
 }

@@ -107,7 +107,7 @@ func TestFetcherTriesMirrorsInOrder(t *testing.T) {
 		w.Write([]byte("example.com\n"))
 	}))
 	defer good.Close()
-	fetch := NewFetcher([]string{bad.URL, good.URL}, 0)
+	fetch := NewFetcher([]string{bad.URL, good.URL}, 0, model.Download{})
 	b, err := fetch(context.Background(), "https://raw.githubusercontent.com/o/r/main/list.lst")
 	if err != nil || string(b) != "example.com\n" {
 		t.Fatalf("b=%q err=%v", b, err)

@@ -311,8 +311,19 @@ type Download struct {
 	Proxy       string   `json:"proxy"`             // http(s)://host:port для загрузок
 	SingboxPath string   `json:"singbox_path"`      // свой бинарник
 	AmneziaPath string   `json:"amnezia_path"`
-	BinDir      string   `json:"bin_dir"` // куда устанавливать ядра
+	BinDir      string   `json:"bin_dir"`   // куда устанавливать ядра
+	Via         string   `json:"via"`       // откуда качать: direct, proxy, core, iface
+	Interface   string   `json:"interface"` // Linux-интерфейс для via=iface
+	CorePort    int      `json:"-"`         // mixed-порт ядра для via=core (заполняется при Normalize)
 }
+
+// Способы загрузки обновлений и компонентов.
+const (
+	ViaDirect = "direct" // напрямую (с зеркалами, если они заданы)
+	ViaProxy  = "proxy"  // через HTTP-прокси из настроек
+	ViaCore   = "core"   // через mixed-порт ядра: маршрут выбирают правила маршрутизации
+	ViaIface  = "iface"  // через выбранный сетевой интерфейс
+)
 
 // Default возвращает настройки «из коробки».
 func Default() *Settings {
@@ -484,6 +495,16 @@ func (s *Settings) Normalize() {
 		}
 	}
 	s.Download.Mirror, s.Download.Mirrors = "", ms
+	switch s.Download.Via {
+	case ViaDirect, ViaProxy, ViaCore, ViaIface:
+	default: // старые настройки: прокси, если он задан, иначе напрямую
+		s.Download.Via = ViaDirect
+		if strings.TrimSpace(s.Download.Proxy) != "" {
+			s.Download.Via = ViaProxy
+		}
+	}
+	s.Download.Interface = strings.TrimSpace(s.Download.Interface)
+	s.Download.CorePort = s.Inbounds.MixedPort
 	for i := range s.Groups {
 		g := &s.Groups[i]
 		if g.Type == "" {

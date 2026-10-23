@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -23,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"corepanel/internal/dlnet"
 	"corepanel/internal/mirror"
 	"corepanel/internal/model"
 	"corepanel/internal/platform"
@@ -277,13 +277,9 @@ func firstLine(s string) string {
 // ---------- сеть ----------
 
 func httpClient(d model.Download) (*http.Client, error) {
-	tr := http.DefaultTransport.(*http.Transport).Clone()
-	if d.Proxy != "" {
-		pu, err := url.Parse(d.Proxy)
-		if err != nil || pu.Host == "" {
-			return nil, fmt.Errorf("неверный адрес прокси «%s»", d.Proxy)
-		}
-		tr.Proxy = http.ProxyURL(pu)
+	tr, err := dlnet.Transport(d)
+	if err != nil {
+		return nil, err
 	}
 	return &http.Client{Transport: tr, Timeout: 0}, nil
 }
