@@ -483,7 +483,7 @@ func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
 					s.noteInterfaceFailure(set, nodes[0].Node, iface, "интерфейс отсутствует или выключен")
 					continue
 				}
-				ok := false
+				ok, skipped := false, false
 				probeErr := errors.New("нет узла для проверки")
 				for _, link := range nodes {
 					nd, exists := findEnabledInterfaceNode(set, link.Node, iface)
@@ -495,6 +495,12 @@ func (s *Supervisor) watchInterfaceRecovery(done <-chan struct{}) {
 						ok = true
 						break
 					}
+					if errors.Is(probeErr, errProbeSkipped) {
+						skipped = true
+					}
+				}
+				if !ok && skipped {
+					continue
 				}
 				if ok {
 					s.noteInterfaceHealthy(iface)

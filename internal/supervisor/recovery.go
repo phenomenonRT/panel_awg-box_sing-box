@@ -112,8 +112,10 @@ func (s *Supervisor) noteInterfaceHealthy(iface string) {
 	if s.ifaceRestarts != nil {
 		s.ifaceRestarts[iface] = 0
 	}
-	if strings.Contains(s.recoverNote, "системный VPN-интерфейс "+iface) || strings.Contains(s.recoverNote, "системный интерфейс "+iface) {
-		s.recoverNote = ""
+	for _, mark := range []string{"системный VPN-интерфейс " + iface + ":", "системный интерфейс " + iface + " "} {
+		if strings.Contains(s.recoverNote, mark) {
+			s.recoverNote = ""
+		}
 	}
 	if !s.recovering && time.Since(s.startedAt) > recoveryHealthyRun {
 		s.recoverTries, s.recoverNote = 0, ""
@@ -178,7 +180,9 @@ func (s *Supervisor) autoRestartInterface(iface string) {
 		s.recoverNote = "Автовосстановление: не удалось перезапустить системный VPN-интерфейс " + iface + ": " + err.Error()
 		s.Logs.Add("[panel] " + s.recoverNote)
 	} else {
-		s.recoverNote = ""
+		if strings.Contains(s.recoverNote, "системный VPN-интерфейс "+iface+":") {
+			s.recoverNote = ""
+		}
 		s.Logs.Add("[panel] системный VPN-интерфейс " + iface + " перезапущен через OpenWrt netifd; ядро не перезапускалось")
 	}
 	s.mu.Unlock()

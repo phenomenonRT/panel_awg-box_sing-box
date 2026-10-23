@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,10 @@ import (
 
 	"corepanel/internal/model"
 )
+
+// errProbeSkipped — проверку выполнить нельзя (ядро ещё не знает такой узел, например настройки не
+// применены): результат не считается ни успехом, ни сбоем.
+var errProbeSkipped = errors.New("узел ещё не загружен в ядро")
 
 const interfaceRecoveryProbeURL = "https://www.gstatic.com/generate_204"
 
@@ -59,6 +64,9 @@ func (s *Supervisor) probeInterfaceNode(parent context.Context, set *model.Setti
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return errProbeSkipped
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("Clash API вернул HTTP %d", resp.StatusCode)
 	}

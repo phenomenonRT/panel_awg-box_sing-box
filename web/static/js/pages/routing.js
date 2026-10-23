@@ -186,6 +186,9 @@ export default async function (root) {
   });
   const presetPicker = h('details', { class: 'rs-picker' }, presetSummary,
     h('div', { class: 'rs-preset-menu' }, presetOptions));
+  const closePicker = (e) => { if (!presetPicker.isConnected) { document.removeEventListener('click', closePicker); return; } if (presetPicker.open && !presetPicker.contains(e.target)) presetPicker.open = false; };
+  document.addEventListener('click', closePicker);
+  presetPicker.addEventListener('keydown', (e) => { if (e.key === 'Escape' && presetPicker.open) { presetPicker.open = false; presetSummary.focus(); } });
   function updatePresetSummary() {
     const label = selectedPresets.size ? 'Выбрано шаблонов: ' + selectedPresets.size : 'Выбрать шаблоны';
     presetSummaryText.textContent = label;
