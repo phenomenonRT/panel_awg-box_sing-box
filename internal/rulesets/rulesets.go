@@ -6,6 +6,7 @@ package rulesets
 import (
 	"bufio"
 	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -268,13 +269,12 @@ func PrepareWithRAM(ctx context.Context, dir, ramDir string, sets []model.RuleSe
 		cancel()
 		if err != nil {
 			warns = append(warns, fmt.Sprintf("набор «%s»: не удалось скачать %s: %v", rs.Name, rs.URL, err))
-			if textSet {
-				if _, e := os.Stat(activeFile); !os.IsNotExist(e) {
-					continue
-				}
-				if writeErr := writeIfChanged(activeFile, []byte(`{"version":2,"rules":[]}`)); writeErr != nil {
-					warns = append(warns, fmt.Sprintf("набор «%s»: не удалось создать пустую копию: %v", rs.Name, writeErr))
-				}
+			// Без старой копии пишем пустой набор: иначе ядро не запустится из-за отсутствующего файла.
+			if _, e := os.Stat(activeFile); !os.IsNotExist(e) {
+				continue
+			}
+			if writeErr := writeIfChanged(activeFile, emptySet(activeFile)); writeErr != nil {
+				warns = append(warns, fmt.Sprintf("набор «%s»: не удалось создать пустую копию: %v", rs.Name, writeErr))
 			}
 			continue
 		}
@@ -365,4 +365,18 @@ func markFetched(stamp, sourceURL string) {
 		return
 	}
 	_ = os.WriteFile(stamp, []byte(sourceURL), 0o600)
+}
+
+// emptySet возвращает корректный пустой набор правил в формате файла: бинарный SRS (версия 1,
+// ноль правил) или исходный JSON.
+func emptySet(file string) []byte {
+	if filepath.Ext(file) != ".srs" {
+		return []byte(`{"version":2,"rules":[]}`)
+	}
+	var buf bytes.Buffer
+	buf.WriteString("SRS\x01")
+	zw := zlib.NewWriter(&buf)
+	zw.Write([]byte{0}) // количество правил (uvarint) = 0
+	zw.Close()
+	return buf.Bytes()
 }

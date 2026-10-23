@@ -1,8 +1,11 @@
 package rulesets
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -114,5 +117,23 @@ func TestFetcherTriesMirrorsInOrder(t *testing.T) {
 	}
 	if len(hits) != 2 || hits[0] != "bad" || hits[1] != "good" {
 		t.Fatalf("порядок обращений: %v", hits)
+	}
+}
+
+func TestEmptySRSStub(t *testing.T) {
+	b := emptySet("x/geosite-a.srs")
+	if len(b) < 5 || string(b[:4]) != "SRS\x01" {
+		t.Fatalf("bad header %q", b[:4])
+	}
+	zr, err := zlib.NewReader(bytes.NewReader(b[4:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(zr)
+	if !bytes.Equal(raw, []byte{0}) {
+		t.Fatalf("payload %v", raw)
+	}
+	if string(emptySet("x/a.json")) != `{"version":2,"rules":[]}` {
+		t.Fatal("json stub")
 	}
 }
