@@ -410,3 +410,10 @@ details:not(.rs-picker)>summary.small:hover,.gset>summary:hover{color:var(--ink)
 @media(max-width:820px){.rs-picker>summary.btn{width:100%}.rs-picker{display:block}.rs-preset-menu{width:100%}}
 .rs-chevron{font-size:13px}
 @media(max-width:820px){.rs-picker{flex:1 1 100%}.rs-preset-menu{left:0;right:0;width:auto}}
+/* кнопка «Выбрать шаблоны»: оттенок акцента и такая же стрелка, как у select */
+.rs-picker>summary.btn{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 35%,var(--line));color:var(--accent);font-weight:600}
+.rs-picker>summary.btn:hover{background:color-mix(in srgb,var(--accent) 16%,var(--surface));border-color:var(--accent)}
+.rs-chevron{font-size:0;width:10px;height:5px;flex:0 0 auto;color:var(--accent);
+  background-image:linear-gradient(45deg,transparent 50%,var(--accent) 50%),linear-gradient(135deg,var(--accent) 50%,transparent 50%);
+  background-position:0 0,5px 0;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.rs-picker[open]>.btn .rs-chevron{transform:none}

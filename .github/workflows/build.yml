@@ -7,7 +7,7 @@ on:
       version:
         description: "Версия обычного релиза (например 0.1.82). Предварительные сборки — в workflow «Сборка corepanel (dev)»"
         required: true
-        default: "0.1.83"
+        default: "0.1.84"
       release:
         description: "Создать GitHub Release с файлами"
         type: boolean
