@@ -30,6 +30,14 @@ type LogBuffer struct {
 	lines []string
 	max   int
 	subs  map[chan string]struct{}
+	hooks []func(string)
+}
+
+// Hook регистрирует обработчик каждой новой строки (вызывается синхронно, должен быть быстрым).
+func (l *LogBuffer) Hook(f func(string)) {
+	l.mu.Lock()
+	l.hooks = append(l.hooks, f)
+	l.mu.Unlock()
 }
 
 func NewLogBuffer(max int) *LogBuffer {
@@ -52,7 +60,11 @@ func (l *LogBuffer) Add(line string) {
 		default: // медленный подписчик не должен тормозить ядро
 		}
 	}
+	hooks := l.hooks
 	l.mu.Unlock()
+	for _, f := range hooks {
+		f(line)
+	}
 }
 
 func (l *LogBuffer) Tail(n int) []string {
@@ -96,6 +108,7 @@ type Supervisor struct {
 	Info platform.Info
 	Inst *installer.Installer
 	Logs *LogBuffer
+	DNS  *DNSLog // журнал DNS-запросов, собранный из журнала ядра
 
 	mu                 sync.Mutex
 	rulesetMu          sync.Mutex
@@ -133,7 +146,8 @@ type Supervisor struct {
 
 // New создаёт супервизор. getSettings вызывается при автоперезапуске.
 func New(info platform.Info, inst *installer.Installer, getSettings func() *model.Settings) *Supervisor {
-	s := &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), getSet: getSettings}
+	s := &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), DNS: NewDNSLog(3000), getSet: getSettings}
+	s.Logs.Hook(s.DNS.Add)
 	go s.watchHandshakes()
 	return s
 }

@@ -174,6 +174,8 @@ func (s *Server) Handler() http.Handler {
 	api("GET", "firewall/preview", s.fwPreview, true)
 	api("GET", "logs", s.logs, true)
 	api("GET", "logs/stream", s.logStream, true)
+	api("GET", "dns/queries", s.dnsQueries, true)
+	api("POST", "dns/queries/clear", s.dnsQueriesClear, true)
 	api("GET", "update", func(w http.ResponseWriter, r *http.Request) { ok(w, s.Updater.State()) }, true)
 	api("POST", "update/check", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)

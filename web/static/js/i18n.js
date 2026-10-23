@@ -87,6 +87,6 @@ export async function initI18n() {
       else if (r.type === 'characterData') { if (r.target.parentNode && r.target.parentNode.tagName !== 'TEXTAREA') fixText(r.target); }
       else if (r.type === 'attributes') fixAttrs(r.target);
     }
-    if (CYR.test(document.title)) document.title = tr(document.title);
+    if (CYR.test(document.title)) { const t = tr(document.title); if (t !== document.title) document.title = t; } // без проверки непереведённый заголовок вызывает бесконечный цикл наблюдателя
   }).observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ATTRS });
 }
