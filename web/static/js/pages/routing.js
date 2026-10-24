@@ -1,4 +1,4 @@
-import { apd, h, clear, pageHead, note, field, fgrid, txt, num, dur, sel, chk, toast, help } from '../ui.js';
+import { apd, h, clear, pageHead, note, field, fgrid, txt, num, dur, sel, chk, toast, help, modal } from '../ui.js';
 import { post } from '../api.js';
 import { ruleEditor } from '../rules.js';
 import * as st from '../state.js';
@@ -124,44 +124,49 @@ export default async function (root) {
     st.touch(); ed.redraw();
   }
 
+  // Компактная таблица, как у узлов: включить/отключить, выбрать выход, при необходимости открыть редактор.
+  function srcHost(r) {
+    const u = String(r.url || '').trim();
+    if (!u) return 'без адреса';
+    try { return new URL(u).host; } catch { return u; }
+  }
+  function editSet(r) {
+    let prev = r.name;
+    const body = h('div',
+      field('Адрес списка (URL)', txt(r, 'url', { ph: 'https://…/set.srs' }), 'Файл .srs или .json — ядро скачивает и обновляет его само. Обычный список (.lst, .txt: домен в строке) панель скачивает и подключает сама.'),
+      fgrid(field('Имя', txt(r, 'name', { ph: 'my-set', onchange: () => { const c = ruleOf(prev); if (c) c.values = [r.name]; prev = r.name; ed.redraw(); } }), 'Внутреннее имя набора; в правилах он выбирается по нему.'),
+        field('Формат', sel(r, 'format', [['', 'определить по URL'], ['srs', 'srs (бинарный)'], ['json', 'json (текстовый)'], ['text', 'список (домен в строке)']]), 'Обычно определяется по адресу.'),
+        field('Обновлять раз в', dur(r, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600], ['сут', 86400], ['мес', 30 * 86400]], { min: 0 }), 'По умолчанию 0: скачать при первом запуске и больше не обновлять.')));
+    modal({ title: 'Набор «' + (r.name || 'новый') + '»', body, wide: true, buttons: [{ text: 'Готово', primary: true, onclick: () => { st.touch(); drawSets(); } }] });
+  }
   function drawSets() {
     clear(setsBox);
-    if (!s.rule_sets.length) setsBox.append(h('div', { class: 'empty' }, 'Наборов пока нет. Выберите шаблон выше и укажите, куда направлять трафик из него.'));
-    s.rule_sets.forEach((r, i) => {
-      let prev = r.name;
-      const cur = ruleOf(r.name);
-      const more = usedElsewhere(r.name);
-      const addedAt = Number(r.added_at);
-      const addedDate = Number.isFinite(addedAt) && addedAt > 0 ? new Date(addedAt).toLocaleDateString() : '';
-      const source = String(r.url || '').trim();
-      let sourceRow = null;
-      if (source) {
-        let sourceLink = source;
-        try {
-          const parsed = new URL(source);
-          if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-            sourceLink = h('a', { href: parsed.href, target: '_blank', rel: 'noopener noreferrer', title: parsed.href }, parsed.href);
-          }
-        } catch { /* Keep invalid or incomplete addresses visible as plain text. */ }
-        sourceRow = h('div', { class: 'small mute rs-source' }, 'Источник данных: ', sourceLink);
-      }
-      const outSel = h('select', { 'aria-label': 'Куда направить трафик набора ' + r.name, onchange: (e) => { if (!r.name) { toast('Сначала укажите имя набора', 'err'); e.target.value = ''; return; } setRule(r.name, e.target.value); drawSets(); } },
-        dest().map(([v, t]) => h('option', { value: v, selected: v === (cur ? cur.outbound : '') }, t)));
-      const status = cur ? h('span', { class: 'badge ok' }, 'направляется → ' + cur.outbound)
-        : more ? h('span', { class: 'badge' }, 'используется в составном правиле')
-          : h('span', { class: 'badge warn' }, 'не используется — трафик не направляется');
-      setsBox.append(h('div', { class: 'rule' },
-        h('div', { class: 'row', style: 'flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:8px' },
-          h('b', r.name || 'новый набор'), addedDate ? h('span', { class: 'small mute' }, 'добавлен ' + addedDate) : null, status, h('span', { class: 'grow' }),
-          h('button', { class: 'btn sm danger', onclick: () => { const old = ruleOf(r.name); if (old) s.rules.splice(s.rules.indexOf(old), 1); s.rule_sets.splice(i, 1); st.touch(); ed.redraw(); drawSets(); } }, 'Удалить')),
-        sourceRow,
-        fgrid(field('Куда направить трафик', outSel, 'Создаёт правило «этот набор → выбранный выход». Правила работают сверху вниз: новое добавляется в конец списка правил, а всё, что не подошло, уходит в «Final».'),
-          field('Адрес списка (URL)', txt(r, 'url', { ph: 'https://…/set.srs' }), 'Файл .srs или .json — ядро скачивает и обновляет его само. Обычный список (.lst, .txt: домен в строке, можно подсети) панель скачивает и преобразует сама.')),
-        h('details', { style: 'margin-top:6px' }, h('summary', { class: 'small' }, 'Дополнительно: имя, формат, обновление'),
-          fgrid(field('Имя', txt(r, 'name', { ph: 'my-set', onchange: () => { const c = ruleOf(prev); if (c) c.values = [r.name]; prev = r.name; ed.redraw(); } }), 'Внутреннее имя набора; в правилах он выбирается по нему.'),
-            field('Формат', sel(r, 'format', [['', 'определить по URL'], ['srs', 'srs (бинарный)'], ['json', 'json (текстовый)'], ['text', 'список (домен в строке)']]), 'Обычно определяется по окончанию ссылки.'),
-            field('Обновлять раз в', dur(r, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600], ['сут', 86400], ['мес', 30 * 86400]], { min: 0 }), 'По умолчанию 0: скачать при первом запуске и больше не обновлять.')))));
-    });
+    if (!s.rule_sets.length) { setsBox.append(h('div', { class: 'empty' }, 'Наборов пока нет. Выберите шаблон выше и укажите, куда направлять трафик из него.')); return; }
+    setsBox.append(h('div', { class: 'tw' }, h('table', { class: 'nodes rsets' },
+      h('thead', h('tr', h('th', 'Вкл'), h('th', 'Набор'), h('th', 'Куда направить'), h('th', ''))),
+      h('tbody', s.rule_sets.map((r, i) => {
+        const cur = ruleOf(r.name);
+        const more = usedElsewhere(r.name);
+        const addedAt = Number(r.added_at);
+        const date = Number.isFinite(addedAt) && addedAt > 0 ? new Date(addedAt).toLocaleDateString() : '';
+        const off = !cur || cur.disabled;
+        const outSel = h('select', { 'aria-label': 'Куда направить трафик набора ' + r.name, onchange: (e) => {
+          if (!r.name) { toast('Сначала укажите имя набора', 'err'); e.target.value = ''; return; }
+          setRule(r.name, e.target.value); drawSets();
+        } }, dest().map(([v, t]) => h('option', { value: v, selected: v === (cur ? cur.outbound : '') }, v === '' ? '— не направлять —' : t)));
+        const state = cur ? null : more ? h('span', { class: 'badge' }, 'в составном правиле') : h('span', { class: 'badge warn' }, 'не направляется');
+        return h('tr', { class: off && !more ? 'off' : '' },
+          h('td', h('input', { type: 'checkbox', checked: !!cur && !cur.disabled, disabled: !cur,
+            title: cur ? '' : 'Сначала выберите, куда направлять трафик набора',
+            'aria-label': 'Включить правило набора ' + r.name,
+            onchange: (e) => { cur.disabled = !e.target.checked; st.touch(); ed.redraw(); drawSets(); } })),
+          h('td', h('div', { class: 'nb' }, r.name || 'новый набор', ' ', state),
+            h('div', { class: 'small mute' }, srcHost(r), r.format ? ' · ' + r.format : '', date ? ' · добавлен ' + date : '')),
+          h('td', outSel),
+          h('td', { class: 'act' },
+            h('button', { class: 'btn sm', onclick: () => editSet(r) }, 'Изменить'), ' ',
+            h('button', { class: 'btn sm danger', 'aria-label': 'Удалить ' + r.name, onclick: () => { const old = ruleOf(r.name); if (old) s.rules.splice(s.rules.indexOf(old), 1); s.rule_sets.splice(i, 1); st.touch(); ed.redraw(); drawSets(); } }, '✕')));
+      })))));
   }
 
   const presetSel = { out: '' };
@@ -242,7 +247,7 @@ export default async function (root) {
           else if (added) toast('Добавлено наборов: ' + added + ' → ' + out, 'ok');
           else toast('Выбранные наборы уже добавлены', 'err');
         } }, 'Добавить'),
-        h('button', { class: 'btn', onclick: () => { s.rule_sets.push({ name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: DEFAULT_RULESET_INTERVAL, added_at: Date.now() }); st.touch(); drawSets(); } }, 'Свой набор по ссылке'),
+        h('button', { class: 'btn', onclick: () => { const n = { name: 'set-' + (s.rule_sets.length + 1), url: '', format: '', behavior: '', interval: DEFAULT_RULESET_INTERVAL, added_at: Date.now() }; s.rule_sets.push(n); st.touch(); drawSets(); editSet(n); } }, 'Свой набор по ссылке'),
         refreshRuleSetsButton),
       setsBox));
   drawSets();

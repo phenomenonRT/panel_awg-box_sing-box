@@ -234,6 +234,8 @@ main{min-width:0}
   table.nodes td:nth-child(3){grid-column:3;grid-row:1}
   table.nodes td:nth-child(4){grid-column:1/4;grid-row:2;padding-top:8px;display:flex;gap:8px}
   table.nodes td:nth-child(4) .btn{flex:1}
+  table.rsets td:nth-child(3){grid-column:2/4;grid-row:2;padding-top:6px}
+  table.rsets td:nth-child(4){grid-row:3}
   .mod{padding:14px 14px 14px 18px}
   .mod-act .btn{flex:1 1 140px}
   #svc{font-size:12px}
@@ -432,3 +434,4 @@ table.dnslog td:nth-child(3){min-width:180px}
   table.dnslog td:nth-child(5){grid-area:res;text-align:right}
 }
 .side a[hidden]{display:none}
+table.rsets td select{min-width:190px;max-width:320px}
