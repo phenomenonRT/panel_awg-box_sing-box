@@ -160,6 +160,23 @@ func buildPlan(s *model.Settings, core string) *plan {
 			switch t {
 			case "private":
 				t, vals = "ip_cidr", append([]string(nil), PrivateCIDRs...)
+			case "auto":
+				groups, bad := classifyAuto(vals)
+				for _, b := range bad {
+					p.warn("%s: не удалось определить тип значения «%s» — пропущено", label, b)
+				}
+				for _, at := range autoRuleTypes {
+					v := groups[at]
+					if len(v) == 0 {
+						continue
+					}
+					if dns && at == "ip_cidr" {
+						p.warn("%s: IP-адреса и подсети в DNS-правилах не поддерживаются — пропущено", label)
+						continue
+					}
+					out = append(out, prule{Type: at, Values: v, Outbound: r.Outbound})
+				}
+				continue
 			case "geosite", "geoip":
 				var names []string
 				for _, v := range vals {

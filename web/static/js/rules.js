@@ -3,18 +3,20 @@ import { h, clear, sel, lines, txt, help } from './ui.js';
 import * as st from './state.js';
 
 export const RULE_TYPES = [
-  ['private', 'Локальные сети'], ['geosite', 'geosite (категории доменов)'], ['geoip', 'geoip (страны/сети)'], ['rule_set', 'Набор правил'],
+  ['private', 'Локальные сети'], ['auto', 'Автоматически (IP, подсети, домены)'], ['geosite', 'geosite (категории доменов)'], ['geoip', 'geoip (страны/сети)'], ['rule_set', 'Набор правил'],
   ['domain', 'Домен (точно)'], ['domain_suffix', 'Домен и поддомены'], ['domain_keyword', 'Домен содержит'], ['domain_regex', 'Домен (regexp)'],
   ['ip_cidr', 'IP / подсеть назначения'], ['src_ip_cidr', 'IP / подсеть источника'], ['port', 'Порт назначения'], ['port_range', 'Диапазон портов'],
   ['network', 'Сеть (tcp/udp)'], ['protocol', 'Протокол (sing-box sniff)'],
 ];
 const DNS_TYPES = ['geosite', 'rule_set', 'domain', 'domain_suffix', 'domain_keyword', 'domain_regex'];
 const PH = {
+  auto: 'example.com\n1.2.3.4\n10.0.0.0/8\nyoutube.com',
   geosite: 'google\ncategory-ads-all', geoip: 'ru\ncn', rule_set: 'имя набора из списка ниже', domain: 'example.com', domain_suffix: 'example.com\nyoutube.com',
   domain_keyword: 'google', domain_regex: '^ad[0-9]+\\.example\\.com$', ip_cidr: '1.1.1.0/24\n8.8.8.8', src_ip_cidr: '192.168.1.50\n192.168.1.0/28',
   port: '443\n8443', port_range: '1000-2000', network: 'udp', protocol: 'bittorrent\ntls\nquic', private: '',
 };
 const TIPS = {
+  auto: 'В одну ячейку можно вставить IP, подсети и домены вместе — тип определится сам: IP и подсети пойдут как адреса, домен — вместе со всеми поддоменами.',
   private: 'Адреса 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 и другие локальные. Значения не нужны.',
   geosite: 'Названия категорий из базы geosite (по одному в строке). Нужные наборы скачаются автоматически.',
   geoip: 'Коды стран или категорий из базы geoip (ru, cn, telegram…). Наборы скачаются автоматически.',
