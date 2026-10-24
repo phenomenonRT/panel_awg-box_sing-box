@@ -506,6 +506,10 @@ func (s *Settings) Normalize() {
 	}
 	s.Download.Interface = strings.TrimSpace(s.Download.Interface)
 	s.Download.CorePort = s.Inbounds.MixedPort
+	// ASN-источник переехал на другой адрес: сохранённые наборы переводим на новый
+	for i := range s.RuleSets {
+		s.RuleSets[i].URL = strings.Replace(s.RuleSets[i].URL, "https://asn.web2core.workers.dev/", "https://sw.ext.io/", 1)
+	}
 	for i := range s.Groups {
 		g := &s.Groups[i]
 		if g.Type == "" {

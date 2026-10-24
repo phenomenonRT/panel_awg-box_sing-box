@@ -8,7 +8,7 @@ const S = st.S;
 const SB = 'https://raw.githubusercontent.com/SagerNet/';
 const ID = 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/';
 const MCT = 'https://raw.githubusercontent.com/avgustvishne/CDN-Cloud-MagiTrickle/main/data/';
-const ASN = 'https://asn.web2core.workers.dev/';
+const ASN = 'https://sw.ext.io/';
 const DEFAULT_RULESET_INTERVAL = 0;
 const MCT_PROFILES = [
   ['FULL', 'full', 'presets/full'], ['BALANCED', 'balanced', 'presets/balanced'],
@@ -75,7 +75,7 @@ function presetSource(preset) {
   if (preset[1] !== 'list') return 'SagerNet/sing-box (geosite и geoip)';
   if (preset[2].startsWith('itdog-')) return 'itdoginfo/allow-domains';
   if (preset[2].startsWith('magitrickle-')) return 'CDN-Cloud-MagiTrickle';
-  if (preset[2].startsWith('asn-')) return 'ASN — asn.web2core.workers.dev';
+  if (preset[2].startsWith('asn-')) return 'ASN — sw.ext.io';
   return 'Другие источники';
 }
 // быстрые шаблоны правил: [подпись, тип, значения, куда]
@@ -213,7 +213,7 @@ export default async function (root) {
     h('div', { class: 'card' }, h('h2', 'Наборы правил'),
       h('p', { class: 'small mute' }, 'Набор — это готовый список доменов или подсетей (Telegram, YouTube, реклама…). Выберите набор и то, куда направлять его трафик: правило создастся само и появится в списке «Правила» выше. Ссылки на списки (.srs) подставляются автоматически.'),
       h('p', { class: 'small mute' }, 'Добавлены профили IPv4/IPv6 от ', h('a', { href: 'https://github.com/avgustvishne/CDN-Cloud-MagiTrickle', target: '_blank', rel: 'noopener noreferrer' }, 'CDN-Cloud-MagiTrickle'), '. Их списки обновляются по ссылкам источника.'),
-      h('p', { class: 'small mute' }, 'Добавлены также отдельные ASN-подписки от ', h('a', { href: 'https://asn.web2core.workers.dev/', target: '_blank', rel: 'noopener noreferrer' }, 'asn.web2core.workers.dev'), '.'),
+      h('p', { class: 'small mute' }, 'Добавлены также отдельные ASN-подписки от ', h('a', { href: 'https://sw.ext.io/', target: '_blank', rel: 'noopener noreferrer' }, 'sw.ext.io'), '.'),
       h('div', { class: 'row', style: 'margin-bottom:10px;flex-wrap:wrap;gap:8px' },
         presetPicker,
         h('span', { class: 'small mute' }, '→'),

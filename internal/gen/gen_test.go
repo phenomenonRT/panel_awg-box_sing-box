@@ -673,11 +673,11 @@ func updateRuleHosts(t *testing.T, s *model.Settings) []string {
 func TestSingboxUpdateViaRoutesSourceHosts(t *testing.T) {
 	s := sample()
 	s.General.UpdateVia = "proxy"
-	s.RuleSets = []model.RuleSet{{Name: "asn-x", URL: "https://asn.web2core.workers.dev/AS1?v4", Format: "text"}}
+	s.RuleSets = []model.RuleSet{{Name: "asn-x", URL: "https://sw.ext.io/AS1?v4", Format: "text"}}
 	s.Download.Mirrors = []string{"https://ghfast.top"}
 	s.Normalize()
 	got := strings.Join(updateRuleHosts(t, s), " ")
-	if !strings.Contains(got, "asn.web2core.workers.dev") || !strings.Contains(got, "ghfast.top") {
+	if !strings.Contains(got, "sw.ext.io") || !strings.Contains(got, "ghfast.top") {
 		t.Errorf("нет правила для адресов источников: %q", got)
 	}
 	s.General.UpdateVia = "direct"
