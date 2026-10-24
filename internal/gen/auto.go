@@ -10,11 +10,10 @@ import (
 var autoHostRe = regexp.MustCompile(`^(?:[\p{L}\p{N}_](?:[\p{L}\p{N}_-]{0,61}[\p{L}\p{N}_])?\.)+[\p{L}\p{N}-]{2,63}$`)
 
 // autoRuleTypes — порядок, в котором результат автоопределения превращается в правила.
-var autoRuleTypes = []string{"domain", "domain_suffix", "domain_keyword", "domain_regex", "ip_cidr"}
+var autoRuleTypes = []string{"domain_suffix", "ip_cidr"}
 
 // classifyAuto раскладывает значения правила «Автоматически» по типам sing-box:
-// IP и подсети → ip_cidr, домен (и *.домен) → domain_suffix, full:домен → domain,
-// keyword:слово → domain_keyword, regexp:выражение → domain_regex, ссылка → её хост.
+// IP и подсети → ip_cidr, домен (вместе с поддоменами) → domain_suffix, ссылка → её домен.
 // Нераспознанные значения возвращаются отдельно.
 func classifyAuto(vals []string) (map[string][]string, []string) {
 	groups := map[string][]string{}
@@ -31,28 +30,6 @@ func classifyAuto(vals []string) (map[string][]string, []string) {
 		s := strings.TrimSpace(raw)
 		if s == "" {
 			continue
-		}
-		if i := strings.Index(s, ":"); i > 0 && !strings.Contains(s[:i], ".") && !strings.Contains(s, "::") && !strings.Contains(s, "://") {
-			v := strings.TrimSpace(s[i+1:])
-			switch strings.ToLower(s[:i]) {
-			case "full":
-				if v != "" {
-					add("domain", strings.ToLower(v))
-					continue
-				}
-			case "keyword":
-				if v != "" {
-					add("domain_keyword", strings.ToLower(v))
-					continue
-				}
-			case "regexp", "regex":
-				if _, err := regexp.Compile(v); err == nil && v != "" {
-					add("domain_regex", v)
-					continue
-				}
-			case "domain", "suffix":
-				s = v
-			}
 		}
 		if strings.Contains(s, "://") {
 			u, err := url.Parse(s)
@@ -71,7 +48,7 @@ func classifyAuto(vals []string) (map[string][]string, []string) {
 			add("ip_cidr", n.String())
 			continue
 		}
-		d := strings.ToLower(strings.TrimSuffix(strings.TrimLeft(s, "*."), "."))
+		d := strings.ToLower(strings.TrimSuffix(s, "."))
 		if autoHostRe.MatchString(d) {
 			add("domain_suffix", d)
 			continue

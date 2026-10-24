@@ -9,19 +9,16 @@ import (
 )
 
 func TestClassifyAuto(t *testing.T) {
-	g, bad := classifyAuto([]string{"example.com", "*.YouTube.com", "1.2.3.4", "10.1.2.3/8", "2001:db8::/32",
-		"https://www.site.org/a/b", "full:Exact.com", "keyword:ads", "regexp:^a\\d+$", "999.1.1.1", "oops"})
+	g, bad := classifyAuto([]string{"example.com", "YouTube.com", "example.com", "1.2.3.4", "10.1.2.3/8", "2001:db8::/32",
+		"https://www.site.org/a/b", "999.1.1.1", "oops", "*.bad.com", "full:x.com"})
 	want := map[string][]string{
-		"domain_suffix":  {"example.com", "youtube.com", "www.site.org"},
-		"ip_cidr":        {"1.2.3.4", "10.0.0.0/8", "2001:db8::/32"},
-		"domain":         {"exact.com"},
-		"domain_keyword": {"ads"},
-		"domain_regex":   {`^a\d+$`},
+		"domain_suffix": {"example.com", "youtube.com", "www.site.org"},
+		"ip_cidr":       {"1.2.3.4", "10.0.0.0/8", "2001:db8::/32"},
 	}
 	if !reflect.DeepEqual(g, want) {
 		t.Errorf("группы: %v", g)
 	}
-	if len(bad) != 2 || bad[0] != "999.1.1.1" || bad[1] != "oops" {
+	if len(bad) != 4 {
 		t.Errorf("не распознано: %v", bad)
 	}
 }

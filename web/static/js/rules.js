@@ -10,13 +10,13 @@ export const RULE_TYPES = [
 ];
 const DNS_TYPES = ['geosite', 'rule_set', 'domain', 'domain_suffix', 'domain_keyword', 'domain_regex'];
 const PH = {
-  auto: 'example.com\n1.2.3.4\n10.0.0.0/8\nfull:www.example.org',
+  auto: 'example.com\n1.2.3.4\n10.0.0.0/8\nyoutube.com',
   geosite: 'google\ncategory-ads-all', geoip: 'ru\ncn', rule_set: 'имя набора из списка ниже', domain: 'example.com', domain_suffix: 'example.com\nyoutube.com',
   domain_keyword: 'google', domain_regex: '^ad[0-9]+\\.example\\.com$', ip_cidr: '1.1.1.0/24\n8.8.8.8', src_ip_cidr: '192.168.1.50\n192.168.1.0/28',
   port: '443\n8443', port_range: '1000-2000', network: 'udp', protocol: 'bittorrent\ntls\nquic', private: '',
 };
 const TIPS = {
-  auto: 'В одну ячейку можно вставить IP, подсети и домены вместе — тип определится сам. Домен вида example.com действует и на поддомены; full:example.com — только на этот домен, keyword:слово — домены со словом, regexp:… — регулярное выражение. Ссылка превратится в её домен.',
+  auto: 'В одну ячейку можно вставить IP, подсети и домены вместе — тип определится сам: IP и подсети пойдут как адреса, домен — вместе со всеми поддоменами.',
   private: 'Адреса 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 и другие локальные. Значения не нужны.',
   geosite: 'Названия категорий из базы geosite (по одному в строке). Нужные наборы скачаются автоматически.',
   geoip: 'Коды стран или категорий из базы geoip (ru, cn, telegram…). Наборы скачаются автоматически.',
