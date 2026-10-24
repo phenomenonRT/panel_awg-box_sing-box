@@ -48,6 +48,7 @@ type Settings struct {
 
 type General struct {
 	LogLevel         string `json:"log_level"` // debug|info|warn|error|none (none — без логов)
+	DNSLog           bool   `json:"dns_log"`   // собирать журнал DNS-запросов из лога ядра (нужен уровень debug)
 	AllowLAN         bool   `json:"allow_lan"` // слушать на 0.0.0.0
 	BypassLAN        bool   `json:"bypass_lan"`
 	Sniff            bool   `json:"sniff"`

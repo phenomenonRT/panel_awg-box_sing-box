@@ -431,3 +431,4 @@ table.dnslog td:nth-child(3){min-width:180px}
   table.dnslog td:nth-child(4){grid-area:type;text-align:right;color:var(--mute)}
   table.dnslog td:nth-child(5){grid-area:res;text-align:right}
 }
+.side a[hidden]{display:none}

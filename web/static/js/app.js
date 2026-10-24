@@ -96,6 +96,8 @@ function startApp() {
     const stt = S.status ? S.status.state : '—';
     const kind = stt === 'running' ? 'ok' : (stt === 'error' || stt === 'failed') ? 'err' : 'warn';
     clear(svc).append(h('span', { class: 'dot ' + kind }), stt === 'running' ? 'работает' : stt === 'stopped' ? 'остановлен' : stt === 'waiting' ? 'ждёт сеть' : stt);
+    const dl = nav.querySelector('[data-r="dnslog"]');
+    if (dl) dl.hidden = !(S.settings.general && S.settings.general.dns_log);
     drawBar();
   };
   unsub = st.subscribe(paint);

@@ -31,6 +31,12 @@ func leaseNames() map[string]string {
 
 // dnsQueries отдаёт журнал DNS-запросов и список устройств; ?client= выбирает одно устройство.
 func (s *Server) dnsQueries(w http.ResponseWriter, r *http.Request) {
+	set := s.St.Get()
+	if !set.General.DNSLog {
+		s.Sup.DNS.Clear()
+		ok(w, map[string]any{"enabled": false, "entries": []any{}, "clients": []any{}})
+		return
+	}
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 || limit > 3000 {
@@ -50,8 +56,9 @@ func (s *Server) dnsQueries(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{
 		"entries":   s.Sup.DNS.Query(q.Get("client"), q.Get("q"), limit),
 		"clients":   clients,
-		"debug":     s.St.Get().General.LogLevel == "debug",
-		"log_level": s.St.Get().General.LogLevel,
+		"enabled":   true,
+		"debug":     set.General.LogLevel == "debug",
+		"log_level": set.General.LogLevel,
 	})
 }
 

@@ -147,7 +147,14 @@ type Supervisor struct {
 // New создаёт супервизор. getSettings вызывается при автоперезапуске.
 func New(info platform.Info, inst *installer.Installer, getSettings func() *model.Settings) *Supervisor {
 	s := &Supervisor{Info: info, Inst: inst, Logs: NewLogBuffer(2000), DNS: NewDNSLog(3000), getSet: getSettings}
-	s.Logs.Hook(s.DNS.Add)
+	s.Logs.Hook(func(line string) {
+		if !strings.Contains(line, "dns: ") && !strings.Contains(line, "DNS packet from") {
+			return // быстрый отсев: остальные строки журнала не разбираются
+		}
+		if set := s.getSet(); set != nil && set.General.DNSLog {
+			s.DNS.Add(line)
+		}
+	})
 	go s.watchHandshakes()
 	return s
 }

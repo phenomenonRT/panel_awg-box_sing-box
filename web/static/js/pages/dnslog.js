@@ -39,6 +39,11 @@ export default async function (root) {
       clients = r.clients || [];
       if (document.activeElement !== deviceSel) drawDevices();
       clear(hint);
+      if (r.enabled === false) {
+        clear(body); count.textContent = '';
+        hint.append(note('warn', 'Журнал DNS-запросов выключен. Включите его на странице «Входящие, TUN, сеть» → «Общие» (галочка «Журнал DNS-запросов»), сохраните настройки и примените.'));
+        return;
+      }
       if (!r.debug) hint.append(note('warn', 'Запросы попадают в журнал только при уровне логов debug (сейчас: ' + (r.log_level || 'не задан') + '). Включите его на странице «Входящие, TUN, сеть» → «Общие», сохраните настройки и перезапустите ядро.'));
       const rows = r.entries || [];
       count.textContent = 'Показано запросов: ' + rows.length;
