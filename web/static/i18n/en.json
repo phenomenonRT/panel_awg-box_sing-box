@@ -1461,5 +1461,8 @@
 "»: не указан IP-адрес": "\": no IP address given",
 "WireGuard-узел (ядро)": "WireGuard node (core)",
 "свой интерфейс (ядро)": "custom interface (core)",
-"Внешние VPN (например, настроенные в OpenWrt) подключаются как узел типа «Системный VPN (интерфейс)» на странице «Узлы и VPN». Системный интерфейс для WireGuard-узла включается в его настройках.": "External VPNs (for example, ones configured in OpenWrt) are connected as a node of type \"System VPN (interface)\" on the \"Nodes and VPN\" page. A WireGuard node's system interface is turned on in its settings."
+"Внешние VPN (например, настроенные в OpenWrt) подключаются как узел типа «Системный VPN (интерфейс)» на странице «Узлы и VPN». Системный интерфейс для WireGuard-узла включается в его настройках.": "External VPNs (for example, ones configured in OpenWrt) are connected as a node of type \"System VPN (interface)\" on the \"Nodes and VPN\" page. A WireGuard node's system interface is turned on in its settings.",
+"Локальные домены": "Local domains",
+"DNS ядра выключен — локальные домены не работают. Включите его галочкой выше.": "Core DNS is off, so local domains do not work. Turn it on with the checkbox above.",
+"Свои имена для устройств: ядро отвечает на них само, не обращаясь к DNS-серверам.": "Your own names for devices: the core answers them itself without asking DNS servers."
 }

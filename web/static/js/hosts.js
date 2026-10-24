@@ -1,5 +1,5 @@
-import { apd, h, clear, pageHead, note, field, fgrid, txt, csv, chk, toast, modal, area } from '../ui.js';
-import * as st from '../state.js';
+import { h, clear, note, field, fgrid, txt, csv, chk, toast, modal, area } from './ui.js';
+import * as st from './state.js';
 
 const S = st.S;
 const NAME_RE = /^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?(\.[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?)*$/;
@@ -15,14 +15,15 @@ function problem(r, all) {
   return bad ? '«' + bad + '» — не IP-адрес' : '';
 }
 
-export default async function (root) {
+// Карточка «Локальные домены» для страницы DNS.
+export function hostsCard() {
   const d = S.settings.dns;
   const list = h('div', { class: 'hosts' });
   const warn = h('div');
 
   function draw() {
     clear(warn);
-    if (!d.enabled) warn.append(note('warn', 'DNS ядра выключен — локальные домены не работают. Включите его в разделе «DNS».'));
+    if (!d.enabled) warn.append(note('warn', 'DNS ядра выключен — локальные домены не работают. Включите его галочкой выше.'));
     clear(list);
     if (!d.hosts.length) list.append(note('', 'Локальных доменов пока нет. Добавьте имя и адрес, например nas.lan → 192.168.1.10: устройства, которые спрашивают DNS у ядра, получат этот адрес.'));
     d.hosts.forEach((r, i) => {
@@ -72,13 +73,16 @@ export default async function (root) {
     });
   }
 
-  apd(root, pageHead('Домены', 'Свои имена для устройств: ядро отвечает на них само, не обращаясь к DNS-серверам'),
+  const card = h('div', { class: 'card', style: 'margin-top:14px' }, h('h2', 'Локальные домены'),
+    h('p', { class: 'small mute' }, 'Свои имена для устройств: ядро отвечает на них само, не обращаясь к DNS-серверам.'),
     warn,
     h('div', { class: 'row', style: 'margin-bottom:10px' },
       h('button', { class: 'btn primary', onclick: add }, '+ Добавить домен'),
       h('button', { class: 'btn', onclick: importHosts }, 'Импорт из hosts'),
       h('span', { class: 'mute small' }, 'Записей: ' + d.hosts.length)),
     list,
-    note('', 'Работает для устройств, чьи DNS-запросы доходят до ядра (DNS роутера → ядро или перехват DNS). Эти ответы стоят выше всех DNS-правил и fakeip, так что имя всегда указывает на заданный адрес. Если у имени нет IPv6-адреса, ядро честно отвечает «записи нет» вместо запроса к внешнему DNS.'));
+    h('p', { class: 'small mute' }, 'Работает для устройств, чьи DNS-запросы доходят до ядра (DNS роутера → ядро или перехват DNS). Эти ответы стоят выше всех DNS-правил и fakeip, так что имя всегда указывает на заданный адрес. Если у имени нет IPv6-адреса, ядро честно отвечает «записи нет» вместо запроса к внешнему DNS.'));
   draw();
+  card.redraw = draw;
+  return card;
 }

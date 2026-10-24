@@ -1,6 +1,7 @@
 import { apd, h, clear, pageHead, note, field, fgrid, txt, sel, chk } from '../ui.js';
 import { ruleEditor } from '../rules.js';
 import { dnsPick } from '../dnspick.js';
+import { hostsCard } from '../hosts.js';
 import * as st from '../state.js';
 
 const S = st.S;
@@ -53,7 +54,8 @@ export default async function (root) {
     drawFlow();
     body.oninput = body.onchange = () => drawFlow();
   }
+  const hc = hostsCard();
   apd(root, pageHead('DNS', 'Разрешение имён внутри ядра'),
-    h('div', { class: 'card' }, chk(d, 'enabled', 'Включить DNS ядра', 'Если выключено, ядро не перехватывает DNS клиентов, а доменные правила по DNS работают хуже.', { onchange: draw }), body));
+    h('div', { class: 'card' }, chk(d, 'enabled', 'Включить DNS ядра', 'Если выключено, ядро не перехватывает DNS клиентов, а доменные правила по DNS работают хуже.', { onchange: () => { draw(); hc.redraw(); } }), body), hc);
   draw();
 }
