@@ -4,8 +4,6 @@ import * as st from '../state.js';
 import { loadAwgStates, awgBadge, delayClass } from '../awgstatus.js';
 
 const S = st.S;
-// Страница «VPN-интерфейсы» просит открыть редактор узла: сюда кладётся имя узла или тип нового.
-export const jump = { edit: '', add: '' };
 export const TYPES = [['vless', 'VLESS'], ['vmess', 'VMess'], ['trojan', 'Trojan'], ['shadowsocks', 'Shadowsocks'], ['hysteria2', 'Hysteria2'], ['tuic', 'TUIC'], ['wireguard', 'WireGuard'], ['awg', 'AmneziaWG'], ['socks', 'SOCKS5'], ['http', 'HTTP'], ['iface', 'Системный VPN (интерфейс)']];
 const TYPE_NAME = Object.fromEntries(TYPES);
 const SS_METHODS = ['2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', 'xchacha20-ietf-poly1305', 'none'];
@@ -338,12 +336,6 @@ export default async function (root) {
         },
       }],
     });
-  }
-
-  if (jump.edit || jump.add) {
-    const { edit, add } = jump; jump.edit = jump.add = '';
-    const i = edit ? s.nodes.findIndex((n) => n.name === edit) : -1;
-    if (edit && i >= 0) editNode(i); else if (add) editNode(-1, add);
   }
 
   // При уходе со страницы останавливаем опрос задержек.

@@ -5,7 +5,7 @@ import { initI18n, lang, nextLang, setLang, tr, LANGS } from './i18n.js';
 
 const S = st.S;
 const ROUTES = [
-  ['dashboard', 'Обзор'], ['nodes', 'Узлы и VPN'], ['vpn', 'VPN-интерфейсы (WireGuard)'], ['groups', 'Группы'],
+  ['dashboard', 'Обзор'], ['nodes', 'Узлы и VPN'], ['groups', 'Группы'],
   ['routing', 'Маршрутизация'], ['dns', 'DNS'], ['domains', 'Домены'], ['dnslog', 'DNS-запросы'], ['network', 'Входящие, TUN, сеть'],
   ['config', 'Конфигурация'], ['logs', 'Логи'], ['components', 'Компоненты'], ['system', 'Система'],
 ];

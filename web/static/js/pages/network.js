@@ -67,6 +67,28 @@ export default async function (root) {
     } }, '+ Добавить интерфейс')));
   drawIfaces();
 
+  // ---- интерфейсы, которые сейчас есть в системе ----
+  const sysBox = h('div');
+  const mine = () => new Set(s.nodes.filter((n) => n.system && (n.type === 'wireguard' || n.type === 'awg'))
+    .map((n) => n.name.toLowerCase().replace(/[^a-z0-9._!@-]/g, '').slice(0, 15) || 'wg0'));
+  function drawSys() {
+    const used = mine();
+    const rows = ifs.filter((i) => used.has(i.name) || /^(wg|awg|tun|utun|usque|warp|nord|proton)/i.test(i.name) || s.ifaces.some((f) => f.name === i.name));
+    clear(sysBox).append(rows.length
+      ? h('div', { class: 'tw' }, h('table', h('thead', h('tr', h('th', 'Интерфейс'), h('th', 'Состояние'), h('th', 'Адреса'), h('th', 'Кто создал'))),
+        h('tbody', rows.map((i) => h('tr', h('td', { class: 'mono' }, i.name), h('td', badge(i.up ? 'активен' : 'не активен', i.up ? 'ok' : 'warn')),
+          h('td', { class: 'mono' }, (i.addrs || []).join(', ') || '—'),
+          h('td', used.has(i.name) ? 'WireGuard-узел (ядро)' : s.ifaces.some((f) => f.name === i.name) ? 'свой интерфейс (ядро)' : 'система или другая программа'))))))
+      : h('p', { class: 'mute' }, 'VPN-интерфейсов в системе сейчас нет.'));
+  }
+  drawSys();
+  let sysT = setInterval(async () => {
+    if (document.hidden) return;
+    try { ifs = (await get('api/interfaces')) || []; drawSys(); } catch (e) { /* ignore */ }
+  }, 5000);
+  const sysCard = h('div', { class: 'card' }, h('h2', 'Интерфейсы в системе'), sysBox,
+    h('p', { class: 'small mute' }, 'Внешние VPN (например, настроенные в OpenWrt) подключаются как узел типа «Системный VPN (интерфейс)» на странице «Узлы и VPN». Системный интерфейс для WireGuard-узла включается в его настройках.'));
+
   const kmBox = h('div');
   apd(root, pageHead('Входящие, TUN и сеть', 'Как трафик попадает в ядро и общие параметры'), dl, kmBox,
     (plat.notes && plat.notes.length) ? h('div', plat.notes.map((n) => note('warn', h('b', (plat.os_name || 'Платформа') + ': '), n))) : null,
@@ -104,7 +126,7 @@ export default async function (root) {
         chk(tun, 'dns_hijack', 'Перехват DNS', 'Все DNS-запросы, попавшие в TUN, обрабатываются DNS ядра.'),
         chk(tun, 'block_ipv6', 'Блокировать IPv6', 'TUN работает только по IPv4, поэтому IPv6-трафик клиентов идёт напрямую, мимо туннеля. Пока работает ядро, IPv6-адреса делаются недостижимыми, и клиенты переходят на IPv4. Если IPv6 в сети не используется, ничего не меняется.')),
       field('Исключить подсети', lines(tun, 'exclude_cidr', { ph: '192.168.0.0/16' }), 'Подсети, которые не нужно направлять в TUN (по одной в строке).')),
-    ifCard,
+    ifCard, sysCard,
     h('div', { class: 'card' }, h('h2', 'Автовосстановление туннелей'),
       chk(recovery, 'enabled', 'Перезапускать ядро при сбое рукопожатий AmneziaWG',
         'Панель следит за журналом ядра: если подряд накопится заданное число неудачных рукопожатий, ядро перезапустится. Помогает при зависшем AmneziaWG, когда сервер не отвечает, а ядро продолжает работать.'),
@@ -174,5 +196,5 @@ export default async function (root) {
     if (k.job && k.job.running) kmT = setTimeout(kmLoad, 1500);
   }
   kmLoad();
-  return () => { kmAlive = false; clearTimeout(kmT); };
+  return () => { kmAlive = false; clearTimeout(kmT); clearInterval(sysT); };
 }
