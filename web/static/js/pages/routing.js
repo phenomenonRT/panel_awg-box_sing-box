@@ -3,6 +3,7 @@ import { post } from '../api.js';
 import { ruleEditor } from '../rules.js';
 import * as st from '../state.js';
 import { transparentNote } from '../transparent.js';
+import { classify } from '../classify.js';
 
 const S = st.S;
 const SB = 'https://raw.githubusercontent.com/SagerNet/';
@@ -91,7 +92,9 @@ export default async function (root) {
   const s = S.settings;
   const outs = () => st.outbounds();
   const proxyOut = () => (s.groups.find((g) => g.type === 'selector') || s.groups[0] || s.nodes[0] || { name: 'direct' }).name;
-  const ed = ruleEditor({ rules: s.rules, outs, defaultOut: proxyOut });
+  // Правила, созданные для наборов («набор → выход»), в списке «Правила» не показываются: ими управляет таблица «Наборы правил», в конфиг они попадают как обычно.
+  const isSetRule = (r) => r.type === 'rule_set' && r.values && r.values.length === 1 && !r.note && s.rule_sets.some((x) => x.name === r.values[0]);
+  const ed = ruleEditor({ rules: s.rules, outs, defaultOut: proxyOut, hidden: isSetRule });
   const setsBox = h('div');
   const core = () => s.core;
 
@@ -203,6 +206,26 @@ export default async function (root) {
     presetSummaryText.textContent = label;
     presetSummary.setAttribute('aria-label', label);
   }
+  // Быстрое добавление: тип каждой записи определяется автоматически, записи одного типа попадают в одно правило.
+  const AUTO_NAMES = { domain_suffix: 'доменов', domain: 'точных доменов', domain_keyword: 'ключевых слов', domain_regex: 'regexp', ip_cidr: 'IP/подсетей', port: 'портов', port_range: 'диапазонов портов' };
+  const autoText = h('textarea', { rows: 2, placeholder: 'example.com\n1.2.3.0/24\n8.8.8.8\nfull:www.example.org', spellcheck: 'false', 'aria-label': 'Домены, IP и подсети для нового правила', style: 'flex:1 1 260px;min-width:220px' });
+  const autoOut = h('select', { 'aria-label': 'Куда направить', style: 'width:auto' },
+    outs().filter((o) => o[0] !== undefined).map(([v, t]) => h('option', { value: v, selected: v === proxyOut() }, t)));
+  function addAuto() {
+    const { groups, bad } = classify(autoText.value);
+    if (!groups.size) { toast(bad.length ? 'Не удалось распознать: ' + bad.slice(0, 3).join(', ') : 'Введите домены, IP или подсети', 'err'); return; }
+    const out = autoOut.value || proxyOut();
+    const done = [];
+    for (const [type, vals] of groups) {
+      const same = s.rules.find((x) => x.type === type && x.outbound === out && !x.disabled && !x.note && Array.isArray(x.values));
+      if (same) for (const v of vals) { if (!same.values.includes(v)) same.values.push(v); }
+      else s.rules.push({ type, values: vals.slice(), outbound: out });
+      done.push(vals.length + ' ' + (AUTO_NAMES[type] || type));
+    }
+    autoText.value = '';
+    st.touch(); ed.redraw();
+    toast('Добавлено: ' + done.join(', ') + ' → ' + out + (bad.length ? '. Не распознано: ' + bad.slice(0, 3).join(', ') : ''), bad.length ? 'err' : 'ok');
+  }
   const g = s.general;
   apd(root, pageHead('Маршрутизация', 'Правила применяются сверху вниз: побеждает первое подходящее'), transparentNote(),
     h('div', { class: 'card' }, h('h2', 'Общее'),
@@ -212,6 +235,10 @@ export default async function (root) {
       chk(g, 'bypass_lan', 'Локальные сети — напрямую (bypass LAN)', 'Добавляет правило «частные адреса → direct» перед остальными, чтобы доступ к роутеру и устройствам дома не уходил в прокси.'),
       chk(g, 'sniff', 'Определять домен и протокол (sniff)', 'Ядро подсматривает SNI/Host в первых пакетах. Нужно для доменных правил при прозрачном прокси и для правил по протоколу.')),
     h('div', { class: 'card' }, h('h2', 'Правила'),
+      h('div', { class: 'row', style: 'margin-bottom:10px;flex-wrap:wrap;gap:8px;align-items:flex-start' },
+        autoText, h('span', { class: 'small mute' }, '→'), autoOut,
+        h('button', { class: 'btn primary', onclick: addAuto }, 'Добавить'),
+        h('div', { class: 'small mute', style: 'flex-basis:100%' }, 'Вставьте домены, IP, подсети, порты или ссылки — тип определится сам: домен → он и его поддомены, full:example.com → только этот домен, keyword:… → содержит, regexp:… → регулярное выражение.')),
       h('div', { class: 'row', style: 'margin-bottom:10px' },
         h('button', { class: 'btn primary', onclick: () => ed.add() }, '+ Добавить правило'),
         h('select', { 'aria-label': 'Шаблон правила', style: 'width:auto', onchange: (e) => {
