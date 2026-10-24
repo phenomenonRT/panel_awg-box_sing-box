@@ -669,6 +669,10 @@ func sbRoute(s *model.Settings, p *plan) *O {
 			rules = append(rules, NewO().Set("inbound", []string{"dns-in"}).Set("action", "hijack-dns"))
 		}
 	}
+	// QUIC (UDP/443) отклоняем до sniff: разбор QUIC дорог для процессора роутера, а клиенты сами откатятся на TCP.
+	if s.General.BlockQUIC {
+		rules = append(rules, NewO().Set("network", []string{"udp"}).Set("port", []int{443}).Set("action", "reject"))
+	}
 	if s.General.Sniff {
 		rules = append(rules, NewO().Set("action", "sniff"))
 	}

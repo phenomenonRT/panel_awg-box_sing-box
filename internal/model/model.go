@@ -52,6 +52,7 @@ type General struct {
 	AllowLAN         bool   `json:"allow_lan"` // слушать на 0.0.0.0
 	BypassLAN        bool   `json:"bypass_lan"`
 	Sniff            bool   `json:"sniff"`
+	BlockQUIC        bool   `json:"block_quic"` // отклонять UDP/443 (QUIC), чтобы клиенты шли по TCP
 	IPv6             bool   `json:"ipv6"`
 	Controller       string `json:"controller"` // адрес Clash API, напр. 127.0.0.1:9090
 	Secret           string `json:"secret"`
