@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,5 +107,31 @@ func TestInvalidSettingsBlocked(t *testing.T) {
 	set.Final = "нет-такого"
 	if err := sup.Start(set); err == nil || !strings.Contains(err.Error(), "ошибки") {
 		t.Fatalf("невалидные настройки должны блокировать запуск: %v", err)
+	}
+}
+
+func TestStaleDNSListen(t *testing.T) {
+	old := localIPs
+	defer func() { localIPs = old }()
+	localIPs = func() []net.IP { return []net.IP{net.ParseIP("192.168.28.1"), net.ParseIP("127.0.0.1")} }
+	cases := []struct {
+		listen string
+		stale  bool
+	}{
+		{"192.168.1.1:1053", true},   // старый LAN-адрес, на роутере его уже нет
+		{"192.168.28.1:1053", false}, // актуальный адрес
+		{"0.0.0.0:1053", false},
+		{"127.0.0.1:1053", false},
+		{"localhost:1053", false},
+		{"мусор", false},
+	}
+	for _, c := range cases {
+		if _, _, got := staleDNSListen(c.listen); got != c.stale {
+			t.Errorf("%s: stale=%v, ожидалось %v", c.listen, got, c.stale)
+		}
+	}
+	localIPs = func() []net.IP { return nil } // интерфейсы не прочитались — не гадаем
+	if _, _, got := staleDNSListen("192.168.1.1:1053"); got {
+		t.Error("при пустом списке адресов слушатель считать устаревшим нельзя")
 	}
 }

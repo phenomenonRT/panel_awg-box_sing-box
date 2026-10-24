@@ -6,6 +6,7 @@ import (
 	"corepanel/internal/kmods"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -215,18 +216,62 @@ func Render(set *model.Settings) (*gen.Result, error) {
 		}
 		return nil, fmt.Errorf("в настройках есть ошибки: %s", strings.Join(msgs, "; "))
 	}
-	note := ""
+	var notes []string
 	if set.Tun.Enabled && set.Tun.AutoRedirect && !queueAvailable() {
 		cp := *set
 		cp.Tun.AutoRedirect = false
 		set = &cp
-		note = "auto_redirect отключён автоматически: в ядре нет модуля nfqueue (установите kmod-nft-queue, чтобы использовать его)"
+		notes = append(notes, "auto_redirect отключён автоматически: в ядре нет модуля nfqueue (установите kmod-nft-queue, чтобы использовать его)")
+	}
+	if set.DNS.Enabled {
+		if host, port, stale := staleDNSListen(set.DNS.Listen); stale {
+			cp := *set
+			cp.DNS.Listen = net.JoinHostPort("0.0.0.0", port)
+			set = &cp
+			notes = append(notes, fmt.Sprintf("DNS-слушатель %s:%s не принадлежит ни одному интерфейсу роутера (адрес сменили?) — слушаю на 0.0.0.0:%s; укажите актуальный адрес в разделе «DNS»", host, port, port))
+		}
 	}
 	res, err := gen.Singbox(set)
-	if err == nil && note != "" {
-		res.Warnings = append(res.Warnings, note)
+	if err == nil {
+		res.Warnings = append(res.Warnings, notes...)
 	}
 	return res, err
+}
+
+// localIPs — адреса интерфейсов роутера (подменяется в тестах).
+var localIPs = func() []net.IP {
+	addrs, _ := net.InterfaceAddrs()
+	var out []net.IP
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok {
+			out = append(out, n.IP)
+		}
+	}
+	return out
+}
+
+// staleDNSListen сообщает, что DNS-слушатель привязан к конкретному IP, которого нет на роутере
+// (например, после смены LAN-адреса): ядро с таким адресом не запустится («cannot assign requested address»).
+// Обычные 0.0.0.0, localhost и адреса, которые есть на интерфейсах, не считаются устаревшими.
+func staleDNSListen(listen string) (host, port string, stale bool) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", "", false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() {
+		return host, port, false
+	}
+	ips := localIPs()
+	if len(ips) == 0 {
+		return host, port, false // интерфейсы не прочитались — не угадываем
+	}
+	for _, l := range ips {
+		if l.Equal(ip) {
+			return host, port, false
+		}
+	}
+	return host, port, true
 }
 
 var queueAvailable = kmods.QueueAvailable
