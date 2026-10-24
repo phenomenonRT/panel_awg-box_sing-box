@@ -653,3 +653,35 @@ func TestFirstMirrorUsedInConfig(t *testing.T) {
 		t.Error("адрес без схемы должен быть ошибкой")
 	}
 }
+
+func updateRuleHosts(t *testing.T, s *model.Settings) []string {
+	res, _ := Singbox(s)
+	var m map[string]any
+	_ = json.Unmarshal([]byte(res.Config), &m)
+	var out []string
+	for _, r := range m["route"].(map[string]any)["rules"].([]any) {
+		rm := r.(map[string]any)
+		if rm["outbound"] == "proxy" && rm["domain"] != nil {
+			for _, h := range rm["domain"].([]any) {
+				out = append(out, h.(string))
+			}
+		}
+	}
+	return out
+}
+
+func TestSingboxUpdateViaRoutesSourceHosts(t *testing.T) {
+	s := sample()
+	s.General.UpdateVia = "proxy"
+	s.RuleSets = []model.RuleSet{{Name: "asn-x", URL: "https://asn.web2core.workers.dev/AS1?v4", Format: "text"}}
+	s.Download.Mirrors = []string{"https://ghfast.top"}
+	s.Normalize()
+	got := strings.Join(updateRuleHosts(t, s), " ")
+	if !strings.Contains(got, "asn.web2core.workers.dev") || !strings.Contains(got, "ghfast.top") {
+		t.Errorf("нет правила для адресов источников: %q", got)
+	}
+	s.General.UpdateVia = "direct"
+	if h := updateRuleHosts(t, s); len(h) != 0 {
+		t.Errorf("при direct правила быть не должно: %v", h)
+	}
+}

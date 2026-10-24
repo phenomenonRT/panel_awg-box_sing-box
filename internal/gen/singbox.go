@@ -2,6 +2,7 @@ package gen
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"corepanel/internal/model"
@@ -640,6 +641,13 @@ func sbRoute(s *model.Settings, p *plan) *O {
 		}
 		rules = append(rules, m)
 	}
+	// Загрузки самой панели (наборы правил, обновления) идут на mixed-порт ядра; без правила они попали бы
+	// под Final. Если выбрано «Скачивать наборы правил через» — отправляем адреса источников туда же.
+	if v := s.General.UpdateVia; v != "" && v != "direct" && v != "block" && known[v] {
+		if hosts := updateHosts(s, p); len(hosts) > 0 {
+			rules = append(rules, NewO().Set("domain", hosts).Set("action", "route").Set("outbound", v))
+		}
+	}
 	if s.General.BypassLAN {
 		rules = append(rules, NewO().Set("ip_is_private", true).Set("action", "route").Set("outbound", "direct"))
 	}
@@ -704,4 +712,28 @@ func sbRoute(s *model.Settings, p *plan) *O {
 	}
 	r.Set("default_domain_resolver", "bootstrap")
 	return r
+}
+
+// updateHosts — адреса, с которых панель скачивает наборы правил, и зеркала GitHub.
+func updateHosts(s *model.Settings, p *plan) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(raw string) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Hostname() == "" {
+			return
+		}
+		h := strings.ToLower(u.Hostname())
+		if !seen[h] {
+			seen[h] = true
+			out = append(out, h)
+		}
+	}
+	for _, sp := range p.sets {
+		add(sp.URL)
+	}
+	for _, m := range s.Download.Mirrors {
+		add(m)
+	}
+	return out
 }
