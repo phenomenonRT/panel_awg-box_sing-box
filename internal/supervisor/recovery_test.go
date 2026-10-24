@@ -1,6 +1,8 @@
 package supervisor
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"corepanel/internal/installer"
@@ -48,5 +50,21 @@ func TestRecoveryCountsFails(t *testing.T) {
 	sup.mu.Unlock()
 	if m != nil {
 		t.Fatalf("при выключенном слежении счётчики должны быть пусты, получено %v", m)
+	}
+}
+
+func TestStartupFetcherGivesUpAfterTwoFailures(t *testing.T) {
+	calls := 0
+	f := startupFetcher(func(ctx context.Context, raw string) ([]byte, error) {
+		calls++
+		return nil, errors.New("timeout")
+	})
+	for i := 0; i < 5; i++ {
+		if _, err := f(context.Background(), "u"); err == nil {
+			t.Fatal("ожидалась ошибка")
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("после двух неудач запросы должны пропускаться, вызовов: %d", calls)
 	}
 }

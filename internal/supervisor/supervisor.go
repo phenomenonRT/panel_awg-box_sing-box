@@ -317,7 +317,7 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 		return err
 	}
 	s.rulesetMu.Lock()
-	ruleSetWarnings := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, s.rulesetFetcher(set, 0), false)
+	ruleSetWarnings := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, set.RuleSets, startupFetcher(s.rulesetFetcher(set, 0)), false)
 	s.rulesetMu.Unlock()
 	for _, w := range ruleSetWarnings {
 		res.Warnings = append(res.Warnings, w)
@@ -376,6 +376,9 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	go tl.run()
 	done := s.done
 	go s.refreshRuleSets(set, dir, ramDir, done)
+	if len(ruleSetWarnings) > 0 {
+		go s.retryRuleSets(set, dir, ramDir, done)
+	}
 	go func() {
 		err := cmd.Wait()
 		tl.Stop()   // дочитать последние строки до сообщения об ошибке
@@ -616,6 +619,60 @@ func (s *Supervisor) RefreshRuleSets(set *model.Settings) (int, int, []string) {
 		s.Logs.Add("[panel] " + warning)
 	}
 	return len(updateSets), managedByCore, warnings
+}
+
+// startupFetcher ограничивает скачивание при запуске ядра: на один адрес — не больше 15 секунд, а после
+// двух неудач подряд остальные пропускаются (сеть до запуска ядра, видимо, недоступна). Иначе несколько
+// недоступных наборов по минуте каждый задерживали бы запуск на несколько минут. Пропущенные наборы
+// докачивает retryRuleSets уже через работающее ядро.
+func startupFetcher(f rulesets.Fetcher) rulesets.Fetcher {
+	fails := 0
+	return func(ctx context.Context, raw string) ([]byte, error) {
+		if fails >= 2 {
+			return nil, errors.New("пропущено: сеть недоступна до запуска ядра, повторим через ядро")
+		}
+		c, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		b, err := f(c, raw)
+		if err != nil {
+			fails++
+		} else {
+			fails = 0
+		}
+		return b, err
+	}
+}
+
+// retryRuleSets докачивает наборы, которые не скачались при запуске: теперь запросы идут и напрямую,
+// и через mixed-порт работающего ядра (по правилам маршрутизации). Ядро само перечитывает изменённые
+// локальные файлы. Попытки: через 20 с, 1, 3 и 10 минут; прекращается, когда всё скачано.
+func (s *Supervisor) retryRuleSets(set *model.Settings, dir, ramDir string, done <-chan struct{}) {
+	var sets []model.RuleSet
+	for _, rs := range set.RuleSets {
+		if rs.URL != "" && (rulesets.IsText(rs) || rs.Interval <= 0) {
+			sets = append(sets, rs)
+		}
+	}
+	if len(sets) == 0 {
+		return
+	}
+	for _, wait := range []time.Duration{20 * time.Second, time.Minute, 3 * time.Minute, 10 * time.Minute} {
+		select {
+		case <-done:
+			return
+		case <-time.After(wait):
+		}
+		s.rulesetMu.Lock()
+		warns := rulesets.PrepareWithRAM(context.Background(), dir, ramDir, sets, s.rulesetFetcher(set, set.Inbounds.MixedPort), false)
+		s.rulesetMu.Unlock()
+		if len(warns) == 0 {
+			s.Logs.Add("[panel] наборы правил докачаны")
+			return
+		}
+		for _, w := range warns {
+			s.Logs.Add("[panel] " + w)
+		}
+	}
 }
 
 // refreshRuleSets обновляет текстовые наборы, пока ядро работает; ядро само перечитывает изменённые локальные файлы.
