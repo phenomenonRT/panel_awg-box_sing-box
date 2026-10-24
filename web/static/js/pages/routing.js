@@ -8,7 +8,7 @@ const S = st.S;
 const SB = 'https://raw.githubusercontent.com/SagerNet/';
 const ID = 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/';
 const MCT = 'https://raw.githubusercontent.com/avgustvishne/CDN-Cloud-MagiTrickle/main/data/';
-const ASN = 'https://sw.ext.io/';
+const ASN = 'https://sw.ext.io/asw/';
 const DEFAULT_RULESET_INTERVAL = 0;
 const MCT_PROFILES = [
   ['FULL', 'full', 'presets/full'], ['BALANCED', 'balanced', 'presets/balanced'],

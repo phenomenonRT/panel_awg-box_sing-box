@@ -508,7 +508,12 @@ func (s *Settings) Normalize() {
 	s.Download.CorePort = s.Inbounds.MixedPort
 	// ASN-источник переехал на другой адрес: сохранённые наборы переводим на новый
 	for i := range s.RuleSets {
-		s.RuleSets[i].URL = strings.Replace(s.RuleSets[i].URL, "https://asn.web2core.workers.dev/", "https://sw.ext.io/", 1)
+		u := s.RuleSets[i].URL
+		u = strings.Replace(u, "https://asn.web2core.workers.dev/", "https://sw.ext.io/asw/", 1)
+		if strings.HasPrefix(u, "https://sw.ext.io/AS") { // адрес без /asw/ (версия 0.1.92) — неверный
+			u = "https://sw.ext.io/asw/" + strings.TrimPrefix(u, "https://sw.ext.io/")
+		}
+		s.RuleSets[i].URL = u
 	}
 	for i := range s.Groups {
 		g := &s.Groups[i]

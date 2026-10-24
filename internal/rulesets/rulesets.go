@@ -178,12 +178,19 @@ func NewFetcher(mirrors []string, proxyPort int, d model.Download) Fetcher {
 		if err != nil {
 			return nil, err
 		}
+		// Часть источников (в том числе ASN-подписки) отвечает 403 на безымянный Go-клиент.
+		req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; corepanel; +https://github.com/phenomenonRT/panel_awg-box_sing-box)")
+		req.Header.Set("Accept", "*/*")
 		resp, err := cl.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 120))
+			if t := strings.Join(strings.Fields(string(snippet)), " "); t != "" {
+				return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, t)
+			}
 			return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 		}
 		return io.ReadAll(io.LimitReader(resp.Body, 32<<20))

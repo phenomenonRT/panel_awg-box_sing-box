@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"corepanel/internal/model"
@@ -135,5 +136,28 @@ func TestEmptySRSStub(t *testing.T) {
 	}
 	if string(emptySet("x/a.json")) != `{"version":2,"rules":[]}` {
 		t.Fatal("json stub")
+	}
+}
+
+func TestFetcherSendsUserAgentAndReportsBody(t *testing.T) {
+	var ua string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua = r.UserAgent()
+		if strings.HasPrefix(ua, "Go-http-client") {
+			http.Error(w, "forbidden", 403)
+			return
+		}
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	f := NewFetcher(nil, 0, model.Download{})
+	b, err := f(context.Background(), srv.URL)
+	if err != nil || string(b) != "ok" || !strings.Contains(ua, "corepanel") {
+		t.Fatalf("ua=%q err=%v b=%q", ua, err, b)
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "blocked by policy", 403) }))
+	defer bad.Close()
+	if _, err := f(context.Background(), bad.URL); err == nil || !strings.Contains(err.Error(), "HTTP 403: blocked by policy") {
+		t.Fatalf("тело ответа должно попасть в ошибку: %v", err)
 	}
 }
