@@ -4,6 +4,8 @@ import * as st from '../state.js';
 import { loadAwgStates, awgBadge, delayClass } from '../awgstatus.js';
 
 const S = st.S;
+// Страница «VPN-интерфейсы» просит открыть редактор узла: сюда кладётся имя узла или тип нового.
+export const jump = { edit: '', add: '' };
 export const TYPES = [['vless', 'VLESS'], ['vmess', 'VMess'], ['trojan', 'Trojan'], ['shadowsocks', 'Shadowsocks'], ['hysteria2', 'Hysteria2'], ['tuic', 'TUIC'], ['wireguard', 'WireGuard'], ['awg', 'AmneziaWG'], ['socks', 'SOCKS5'], ['http', 'HTTP'], ['iface', 'Системный VPN (интерфейс)']];
 const TYPE_NAME = Object.fromEntries(TYPES);
 const SS_METHODS = ['2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', 'xchacha20-ietf-poly1305', 'none'];
@@ -17,7 +19,6 @@ const ifaces = () => get('api/interfaces').catch(() => []);
 export default async function (root) {
   const s = S.settings;
   const tableBox = h('div');
-  const vpnBox = h('div');
 
   // Состояние AWG-туннелей из журнала ядра (нужен уровень debug); загружается один раз при открытии страницы.
   let awgState = null;
@@ -134,7 +135,7 @@ export default async function (root) {
     for (const x of s.nodes) if (x.detour === n.name) x.detour = '';
     s.nodes.splice(i, 1); st.pruneRefs(); st.touch(); redraw();
   }
-  function redraw() { drawTable(); drawVpn(); }
+  function redraw() { drawTable(); }
 
   // ---- импорт ----
   const imp = { text: '', url: '' };
@@ -294,22 +295,6 @@ export default async function (root) {
   bRefreshSubscriptions.onclick = refreshSubscriptions;
   drawSubscriptions();
 
-  // ---- системные WireGuard-интерфейсы ----
-  function drawVpn() {
-    clear(vpnBox);
-    const wg = s.nodes.filter((n) => n.type === 'wireguard' || n.type === 'awg');
-    vpnBox.append(
-      h('div', { class: 'card' }, h('h2', 'VPN-интерфейсы (WireGuard)'),
-      h('p', 'Узел WireGuard по умолчанию — обычный исходящий: трафик попадает в него только по правилам маршрутизации. Если включить «Системный интерфейс» (',
-        h('code', 'system=true'), '), sing-box создаст настоящий сетевой интерфейс wg в ОС — его можно использовать в маршрутах роутера и других программах.'),
-      note('warn', 'Системный интерфейс требует прав root.'),
-      wg.length ? h('div', { class: 'tw' }, h('table', h('thead', h('tr', h('th', 'Узел'), h('th', 'Адреса'), h('th', 'Системный интерфейс'))),
-        h('tbody', wg.map((n) => h('tr', h('td', n.name, n.type === 'awg' ? badge('AWG') : null), h('td', { class: 'mono' }, (n.addresses || []).join(', ') || '—'),
-          h('td', h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!n.system, onchange: (e) => { n.system = e.target.checked; st.touch(); } }), 'создавать')))))))
-        : h('p', { class: 'mute' }, 'WireGuard-узлов нет. Импортируйте .conf или добавьте узел вручную.'),
-      h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn', onclick: () => editNode(-1, 'wireguard') }, 'Добавить WireGuard'), h('button', { class: 'btn', onclick: () => editNode(-1, 'awg') }, 'Добавить AmneziaWG'))));
-  }
-
   apd(root, pageHead('Узлы и VPN', 'Прокси-серверы и WireGuard, через которые пойдёт трафик'),
     h('div', { class: 'row', style: 'margin-bottom:10px' }, h('button', { class: 'btn primary', onclick: () => editNode(-1) }, '+ Добавить узел'), h('span', { class: 'mute small' }, 'Узлов: ' + s.nodes.length)),
     tableBox,
@@ -319,8 +304,7 @@ export default async function (root) {
       h('div', { class: 'row', style: 'align-items:flex-end' }, h('div', { class: 'grow', style: 'min-width:220px' }, field('Подписка по URL', urlIn)), h('div', { style: 'margin-bottom:10px' }, bAddSubscription)),
       impRes,
       h('div', { class: 'row', style: 'margin-top:12px' }, h('h3', { class: 'grow' }, 'Сохранённые подписки'), bRefreshSubscriptions),
-      subscriptionsBox, subscriptionsResult),
-    vpnBox);
+      subscriptionsBox, subscriptionsResult));
   redraw();
   loadPings();
   pingT = setInterval(loadPings, 15000);
@@ -354,6 +338,12 @@ export default async function (root) {
         },
       }],
     });
+  }
+
+  if (jump.edit || jump.add) {
+    const { edit, add } = jump; jump.edit = jump.add = '';
+    const i = edit ? s.nodes.findIndex((n) => n.name === edit) : -1;
+    if (edit && i >= 0) editNode(i); else if (add) editNode(-1, add);
   }
 
   // При уходе со страницы останавливаем опрос задержек.

@@ -111,6 +111,17 @@ type DNS struct {
 	FakeIPRange  string `json:"fakeip_range"`
 	Final        string `json:"final"` // remote | local
 	Rules        []Rule `json:"rules,omitempty"`
+	// Hosts — локальные домены: имя → IP-адреса, которые ядро отдаёт само, не обращаясь к DNS-серверам.
+	Hosts []LocalDomain `json:"hosts,omitempty"`
+}
+
+// LocalDomain — локальное имя с привязкой к IP-адресам (как запись в /etc/hosts, но на уровне DNS ядра).
+type LocalDomain struct {
+	Name       string   `json:"name"`
+	IPs        []string `json:"ips"`
+	Subdomains bool     `json:"subdomains,omitempty"` // отвечать и для всех поддоменов (*.name)
+	Disabled   bool     `json:"disabled,omitempty"`
+	Note       string   `json:"note,omitempty"`
 }
 
 // Node — один исходящий узел (прокси или VPN).
@@ -411,6 +422,7 @@ func (s *Settings) Normalize() {
 	if s.DNS.Final == "" {
 		s.DNS.Final = "remote"
 	}
+	s.DNS.Hosts = normalizeHosts(s.DNS.Hosts)
 	if s.Final == "" {
 		s.Final = "direct"
 	}
@@ -781,6 +793,27 @@ func (s *Settings) Validate() []Issue {
 			add("error", "DNS-правило №%d: сервер должен быть local, remote или block", i+1)
 		}
 	}
+	seenHost := map[string]bool{}
+	for i, h := range s.DNS.Hosts {
+		if h.Disabled {
+			continue
+		}
+		switch {
+		case !ValidHostname(h.Name):
+			add("error", "локальный домен №%d: «%s» — некорректное имя", i+1, h.Name)
+		case seenHost[h.Name]:
+			add("error", "локальный домен «%s» указан дважды", h.Name)
+		}
+		seenHost[h.Name] = true
+		if len(h.IPs) == 0 {
+			add("error", "локальный домен «%s»: не указан IP-адрес", h.Name)
+		}
+		for _, ip := range h.IPs {
+			if net.ParseIP(ip) == nil {
+				add("error", "локальный домен «%s»: «%s» — не IP-адрес", h.Name, ip)
+			}
+		}
+	}
 	for _, p := range []struct {
 		n string
 		v int
@@ -827,6 +860,47 @@ func validIPOrCIDR(v string) bool {
 	}
 	_, _, err := net.ParseCIDR(v)
 	return err == nil
+}
+
+var hostLabel = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?$`)
+
+// ValidHostname — допустимое DNS-имя (метки из букв, цифр, «-» и «_»; без wildcard и точки на конце).
+func ValidHostname(n string) bool {
+	if n == "" || len(n) > 253 {
+		return false
+	}
+	for _, l := range strings.Split(n, ".") {
+		if !hostLabel.MatchString(l) {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeHosts приводит имена к нижнему регистру, убирает «*.», точку на конце, пробелы и пустые адреса.
+func normalizeHosts(in []LocalDomain) []LocalDomain {
+	var out []LocalDomain
+	for _, h := range in {
+		n := strings.ToLower(strings.TrimSpace(h.Name))
+		n = strings.TrimSuffix(n, ".")
+		if strings.HasPrefix(n, "*.") {
+			n = n[2:]
+			h.Subdomains = true
+		}
+		h.Name = n
+		var ips []string
+		for _, ip := range h.IPs {
+			if ip = strings.TrimSpace(ip); ip != "" {
+				ips = append(ips, ip)
+			}
+		}
+		h.IPs = ips
+		if h.Name == "" && len(h.IPs) == 0 {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
 }
 
 func groupCycle(gs []Group) string {

@@ -14,7 +14,7 @@ export function normalize(s) {
   for (const k of ['nodes', 'subscriptions', 'groups', 'rule_sets', 'rules', 'ifaces']) arr(s, k);
   s.subscriptions = s.subscriptions.filter((sub) => sub && typeof sub === 'object' && !Array.isArray(sub));
   for (const sub of s.subscriptions) arr(sub, 'nodes');
-  arr(s.dns, 'rules'); arr(s.tun, 'exclude_cidr'); arr(s.download, 'mirrors');
+  arr(s.dns, 'rules'); arr(s.dns, 'hosts'); arr(s.tun, 'exclude_cidr'); arr(s.download, 'mirrors');
   if (s.download.mirror) { // старое поле «одно зеркало» переезжает в список
     const m = String(s.download.mirror).trim();
     if (m && !s.download.mirrors.some((x) => x.toLowerCase() === m.toLowerCase())) s.download.mirrors.unshift(m);

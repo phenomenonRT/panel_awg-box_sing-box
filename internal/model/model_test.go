@@ -1,6 +1,9 @@
 package model
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNormalizeMigratesASNHost(t *testing.T) {
 	s := Default()
@@ -17,5 +20,19 @@ func TestNormalizeMigratesASNHost(t *testing.T) {
 	s.Normalize()
 	if got := s.RuleSets[0].URL; got != "https://sw.ext.io/asw/AS50340?v4" {
 		t.Fatalf("повторная нормализация испортила адрес: %s", got)
+	}
+}
+
+func TestValidateLocalDomains(t *testing.T) {
+	s := Default()
+	s.DNS.Hosts = []LocalDomain{{Name: "bad name", IPs: []string{"1.1.1.1"}}, {Name: "a.lan", IPs: []string{"x"}}, {Name: "b.lan"}}
+	n := 0
+	for _, i := range s.Validate() {
+		if i.Level == "error" && strings.Contains(i.Message, "локальный домен") {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Errorf("ожидали 3 ошибки, получили %d", n)
 	}
 }

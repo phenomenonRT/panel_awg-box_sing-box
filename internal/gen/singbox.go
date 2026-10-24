@@ -2,6 +2,7 @@ package gen
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -168,6 +169,7 @@ func sbDNS(s *model.Settings, p *plan) (*O, error) {
 			nodeDNS = "bootstrap"
 		}
 	}
+	hostRules, hostsSrv := sbLocalHosts(s)
 	servers := []any{
 		sbDNSServer("bootstrap", boot, ""),
 		sbDNSServer("local", local, localDetour),
@@ -181,9 +183,13 @@ func sbDNS(s *model.Settings, p *plan) (*O, error) {
 		}
 		servers = append(servers, f)
 	}
+	if hostsSrv != nil {
+		servers = append(servers, hostsSrv)
+	}
 	dns.Set("servers", servers)
 
-	var rules []any
+	// Локальные домены — самыми первыми: их не должны перехватывать ни fakeip, ни пользовательские правила.
+	rules := append([]any(nil), hostRules...)
 	if doms := nodeServerDomains(s); len(doms) > 0 {
 		rules = append(rules, NewO().Set("domain", doms).Set("action", "route").Set("server", nodeDNS))
 	}
@@ -219,6 +225,57 @@ func sbDNS(s *model.Settings, p *plan) (*O, error) {
 		dns.Set("strategy", "ipv4_only")
 	}
 	return dns, nil
+}
+
+// sbLocalHosts строит DNS-правила для локальных доменов. Точные имена отдаёт сервер hosts,
+// имена с поддоменами — правила predefined по типу запроса (A/AAAA).
+func sbLocalHosts(s *model.Settings) ([]any, *O) {
+	var exact []string
+	predefined := NewO()
+	var rules []any
+	for _, h := range s.DNS.Hosts {
+		if h.Disabled || h.Name == "" || len(h.IPs) == 0 {
+			continue
+		}
+		var v4, v6 []string
+		for _, ip := range h.IPs {
+			if a := net.ParseIP(ip); a != nil {
+				if a.To4() != nil {
+					v4 = append(v4, a.String())
+				} else {
+					v6 = append(v6, a.String())
+				}
+			}
+		}
+		if !h.Subdomains {
+			exact = append(exact, h.Name)
+			predefined.Set(h.Name, h.IPs)
+			continue
+		}
+		for _, t := range []struct {
+			q   string
+			ips []string
+		}{{"A", v4}, {"AAAA", v6}} {
+			r := NewO().Set("domain_suffix", []string{h.Name}).Set("query_type", []string{t.q}).
+				Set("action", "predefined")
+			if len(t.ips) == 0 {
+				r.Set("rcode", "NOERROR")
+			} else {
+				var ans []string
+				for _, ip := range t.ips {
+					ans = append(ans, fmt.Sprintf("%s. 60 IN %s %s", h.Name, t.q, ip))
+				}
+				r.Set("answer", ans)
+			}
+			rules = append(rules, r)
+		}
+	}
+	var srv *O
+	if len(exact) > 0 {
+		srv = NewO().Set("type", "hosts").Set("tag", "local-hosts").Set("predefined", predefined)
+		rules = append([]any{NewO().Set("domain", exact).Set("action", "route").Set("server", "local-hosts")}, rules...)
+	}
+	return rules, srv
 }
 
 // sbMatch превращает правило в условие sing-box (без действия).

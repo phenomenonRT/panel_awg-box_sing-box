@@ -685,3 +685,55 @@ func TestSingboxUpdateViaRoutesSourceHosts(t *testing.T) {
 		t.Errorf("при direct правила быть не должно: %v", h)
 	}
 }
+
+func TestSingboxLocalDomains(t *testing.T) {
+	s := sample()
+	s.DNS.Hosts = []model.LocalDomain{
+		{Name: "NAS.lan.", IPs: []string{"192.168.1.10", " "}},
+		{Name: "*.home.lan", IPs: []string{"192.168.1.20"}},
+		{Name: "off.lan", IPs: []string{"10.0.0.1"}, Disabled: true},
+	}
+	s.Normalize()
+	if is := s.Validate(); len(is) > 0 {
+		for _, i := range is {
+			if i.Level == "error" {
+				t.Fatalf("валидация: %v", i)
+			}
+		}
+	}
+	res, err := Singbox(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m struct {
+		DNS struct {
+			Servers []map[string]any `json:"servers"`
+			Rules   []map[string]any `json:"rules"`
+		} `json:"dns"`
+	}
+	if err := json.Unmarshal([]byte(res.Config), &m); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, sv := range m.DNS.Servers {
+		if sv["tag"] == "local-hosts" {
+			found = true
+			pre := sv["predefined"].(map[string]any)
+			if _, ok := pre["nas.lan"]; !ok || len(pre) != 1 {
+				t.Errorf("predefined: %v", pre)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("нет сервера local-hosts")
+	}
+	if m.DNS.Rules[0]["server"] != "local-hosts" {
+		t.Errorf("правило локальных доменов должно быть первым: %v", m.DNS.Rules[0])
+	}
+	if !strings.Contains(res.Config, "home.lan. 60 IN A 192.168.1.20") || !strings.Contains(res.Config, `"rcode": "NOERROR"`) {
+		t.Errorf("нет ответов для поддоменов:\n%s", res.Config)
+	}
+	if strings.Contains(res.Config, "off.lan") {
+		t.Error("отключённый домен попал в конфиг")
+	}
+}
