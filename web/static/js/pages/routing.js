@@ -91,7 +91,9 @@ export default async function (root) {
   const s = S.settings;
   const outs = () => st.outbounds();
   const proxyOut = () => (s.groups.find((g) => g.type === 'selector') || s.groups[0] || s.nodes[0] || { name: 'direct' }).name;
-  const ed = ruleEditor({ rules: s.rules, outs, defaultOut: proxyOut });
+  // Правила, созданные для наборов («набор → выход»), в списке «Правила» не показываются: ими управляет таблица «Наборы правил», в конфиг они попадают как обычно.
+  const isSetRule = (r) => r.type === 'rule_set' && r.values && r.values.length === 1 && !r.note && s.rule_sets.some((x) => x.name === r.values[0]);
+  const ed = ruleEditor({ rules: s.rules, outs, defaultOut: proxyOut, hidden: isSetRule });
   const setsBox = h('div');
   const core = () => s.core;
 
