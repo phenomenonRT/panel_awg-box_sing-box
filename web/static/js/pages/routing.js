@@ -10,6 +10,8 @@ const ID = 'https://raw.githubusercontent.com/itdoginfo/allow-domains/main/';
 const MCT = 'https://raw.githubusercontent.com/avgustvishne/CDN-Cloud-MagiTrickle/main/data/';
 const ASN = 'https://sw.ext.io/asw/';
 const DEFAULT_RULESET_INTERVAL = 0;
+// Единицы для «Обновлять раз в»: часы, сутки, месяцы (минуты и секунды не нужны). Значение хранится в секундах.
+const RULESET_INTERVAL_UNITS = [['ч', 3600], ['сут', 86400], ['мес', 30 * 86400]];
 const MCT_PROFILES = [
   ['FULL', 'full', 'presets/full'], ['BALANCED', 'balanced', 'presets/balanced'],
   ['PERFORMANCE', 'performance', 'presets/performance'], ['MINIMAL', 'minimal', 'presets/minimal'],
@@ -136,14 +138,14 @@ export default async function (root) {
       field('Адрес списка (URL)', txt(r, 'url', { ph: 'https://…/set.srs' }), 'Файл .srs или .json — ядро скачивает и обновляет его само. Обычный список (.lst, .txt: домен в строке) панель скачивает и подключает сама.'),
       fgrid(field('Имя', txt(r, 'name', { ph: 'my-set', onchange: () => { const c = ruleOf(prev); if (c) c.values = [r.name]; prev = r.name; ed.redraw(); } }), 'Внутреннее имя набора; в правилах он выбирается по нему.'),
         field('Формат', sel(r, 'format', [['', 'определить по URL'], ['srs', 'srs (бинарный)'], ['json', 'json (текстовый)'], ['text', 'список (домен в строке)']]), 'Обычно определяется по адресу.'),
-        field('Обновлять раз в', dur(r, 'interval', [['сек', 1], ['мин', 60], ['ч', 3600], ['сут', 86400], ['мес', 30 * 86400]], { min: 0 }), 'По умолчанию 0: скачать при первом запуске и больше не обновлять.')));
+        field('Обновлять раз в', dur(r, 'interval', RULESET_INTERVAL_UNITS, { min: 0 }), 'По умолчанию 0: скачать при первом запуске и больше не обновлять.')));
     modal({ title: 'Набор «' + (r.name || 'новый') + '»', body, wide: true, buttons: [{ text: 'Готово', primary: true, onclick: () => { st.touch(); drawSets(); } }] });
   }
   function drawSets() {
     clear(setsBox);
     if (!s.rule_sets.length) { setsBox.append(h('div', { class: 'empty' }, 'Наборов пока нет. Выберите шаблон выше и укажите, куда направлять трафик из него.')); return; }
     setsBox.append(h('div', { class: 'tw' }, h('table', { class: 'nodes rsets' },
-      h('thead', h('tr', h('th', 'Вкл'), h('th', 'Набор'), h('th', 'Куда направить'), h('th', ''))),
+      h('thead', h('tr', h('th', 'Вкл'), h('th', 'Набор'), h('th', 'Куда направить'), h('th', 'Обновлять раз в'), h('th', ''))),
       h('tbody', s.rule_sets.map((r, i) => {
         const cur = ruleOf(r.name);
         const more = usedElsewhere(r.name);
@@ -163,6 +165,8 @@ export default async function (root) {
           h('td', h('div', { class: 'nb' }, r.name || 'новый набор', ' ', state),
             h('div', { class: 'small mute' }, srcHost(r), r.format ? ' · ' + r.format : '', date ? ' · добавлен ' + date : '')),
           h('td', outSel),
+          h('td', { class: 'ivl', title: 'Обновлять раз в. 0 — скачать при первом запуске и больше не обновлять' },
+            dur(r, 'interval', RULESET_INTERVAL_UNITS, { min: 0 })),
           h('td', { class: 'act' },
             h('button', { class: 'btn sm', onclick: () => editSet(r) }, 'Изменить'), ' ',
             h('button', { class: 'btn sm danger', 'aria-label': 'Удалить ' + r.name, onclick: () => { const old = ruleOf(r.name); if (old) s.rules.splice(s.rules.indexOf(old), 1); s.rule_sets.splice(i, 1); st.touch(); ed.redraw(); drawSets(); } }, '✕')));
