@@ -23,8 +23,7 @@ const TIPS = {
   protocol: 'Работает только при включённом sniff.',
 };
 
-// hidden(r) — необязательный признак правил, которые остаются в конфиге, но не показываются в списке (например, правила наборов).
-export function ruleEditor({ rules, outs, dns = false, defaultOut, hidden }) {
+export function ruleEditor({ rules, outs, dns = false, defaultOut }) {
   const box = h('div');
   let dragFrom = -1;
   const types = dns ? RULE_TYPES.filter((t) => DNS_TYPES.includes(t[0])) : RULE_TYPES;
@@ -34,8 +33,7 @@ export function ruleEditor({ rules, outs, dns = false, defaultOut, hidden }) {
     const [r] = rules.splice(i, 1); rules.splice(j, 0, r);
     st.touch(); draw();
   }
-  const isHidden = (r) => !!hidden && hidden(r);
-  function row(r, i, n, prev, next) {
+  function row(r, i) {
     const o = typeof outs === 'function' ? outs() : outs;
     const el = h('div', { class: 'rule' + (r.disabled ? ' off' : '') });
     const grip = h('span', { class: 'grip', draggable: 'true', title: 'Перетащите, чтобы изменить порядок', 'aria-hidden': 'true' }, '⠿');
@@ -45,12 +43,12 @@ export function ruleEditor({ rules, outs, dns = false, defaultOut, hidden }) {
     el.addEventListener('drop', (e) => { e.preventDefault(); const f = dragFrom; dragFrom = -1; move(f, i); });
     grip.addEventListener('dragend', () => { dragFrom = -1; box.querySelectorAll('.over').forEach((x) => x.classList.remove('over')); });
     el.append(
-      h('div', { class: 'hd' }, grip, h('b', { class: 'mono small' }, '#' + n),
+      h('div', { class: 'hd' }, grip, h('b', { class: 'mono small' }, '#' + (i + 1)),
         sel(r, 'type', types, { onchange: draw }), h('span', { 'aria-hidden': 'true' }, '→'), sel(r, 'outbound', o),
         TIPS[r.type] ? help(TIPS[r.type]) : null, h('span', { class: 'grow' }),
         h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !r.disabled, onchange: (e) => { r.disabled = !e.target.checked; st.touch(); el.classList.toggle('off', r.disabled); } }), 'вкл'),
-        h('button', { class: 'btn sm', 'aria-label': 'Выше', disabled: prev < 0, onclick: () => move(i, prev) }, '↑'),
-        h('button', { class: 'btn sm', 'aria-label': 'Ниже', disabled: next < 0, onclick: () => move(i, next) }, '↓'),
+        h('button', { class: 'btn sm', 'aria-label': 'Выше', disabled: i === 0, onclick: () => move(i, i - 1) }, '↑'),
+        h('button', { class: 'btn sm', 'aria-label': 'Ниже', disabled: i === rules.length - 1, onclick: () => move(i, i + 1) }, '↓'),
         h('button', { class: 'btn sm danger', 'aria-label': 'Удалить правило', onclick: () => { rules.splice(i, 1); st.touch(); draw(); } }, '✕')),
       h('div', { class: 'bd', style: r.type === 'private' ? 'grid-template-columns:1fr' : null },
         r.type === 'private' ? null : lines(r, 'values', { rows: 2, ph: PH[r.type] || 'по одному значению в строке', dedupe: true, cs: r.type === 'rule_set' || r.type === 'domain_regex' }),
@@ -59,10 +57,8 @@ export function ruleEditor({ rules, outs, dns = false, defaultOut, hidden }) {
   }
   function draw() {
     clear(box);
-    const vis = [];
-    rules.forEach((r, i) => { if (!isHidden(r)) vis.push(i); });
-    if (!vis.length) box.append(h('div', { class: 'empty' }, 'Правил нет'));
-    vis.forEach((i, k) => box.append(row(rules[i], i, k + 1, k > 0 ? vis[k - 1] : -1, k < vis.length - 1 ? vis[k + 1] : -1)));
+    if (!rules.length) box.append(h('div', { class: 'empty' }, 'Правил нет'));
+    rules.forEach((r, i) => box.append(row(r, i)));
   }
   draw();
   return {
