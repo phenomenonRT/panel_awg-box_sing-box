@@ -490,6 +490,11 @@ func (in *Installer) install(ctx context.Context, core, version string, d model.
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return "", fmt.Errorf("не удалось создать каталог %s: %v", binDir, err)
 	}
+	return in.installTargets(ctx, c, core, tgs, binDir, d)
+}
+
+// installTargets пробует сборки по очереди, пока одна не запустится.
+func (in *Installer) installTargets(ctx context.Context, c *http.Client, core string, tgs []target, binDir string, d model.Download) (string, error) {
 	var fails []string
 	for _, tg := range tgs {
 		ver, err := in.installOne(ctx, c, core, tg, binDir)
@@ -505,6 +510,11 @@ func (in *Installer) install(ctx context.Context, core, version string, d model.
 		}
 		var nr notRunnable
 		if !errors.As(err, &nr) {
+			if len(fails) > 0 {
+				// без этого видна только последняя ошибка (например «мало места» для запасной сборки),
+				// а настоящая причина — почему не запустилась основная — теряется
+				err = fmt.Errorf("%v. Перед этим: %s", err, strings.Join(fails, "; "))
+			}
 			return "", err
 		}
 		fails = append(fails, tg.Name+": "+err.Error())
@@ -533,9 +543,7 @@ func (in *Installer) installOne(ctx context.Context, c *http.Client, core string
 		need = uint64(tg.Size) * 11 / 10 // бинарник качается как есть, без распаковки
 	}
 	if free := platform.FreeBytes(binDir); free > 0 && tg.Size > 0 && free < need {
-		return "", fmt.Errorf("в %s свободно %d МБ — слишком мало (размер загрузки %d МБ, после распаковки ядро занимает около %d МБ). "+
-			"Подключите накопитель и задайте каталог в разделе «Компоненты» либо установите ядро из пакетов системы",
-			binDir, free>>20, tg.Size>>20, (tg.Size*5/2)>>20)
+		return "", fmt.Errorf("%s: %s", tg.Name, noSpaceText(core, binDir, free, tg.Size))
 	}
 
 	in.Job.set(func(j *Job) { j.Stage, j.Message = "download", "Скачиваю и распаковываю "+tg.Name })
@@ -565,7 +573,7 @@ func (in *Installer) installOne(ctx context.Context, c *http.Client, core string
 	in.Job.set(func(j *Job) { j.Stage, j.Message, j.Percent = "verify", "Проверяю запуск…", 95 })
 	ver, err := Version(ctx, core, newBin)
 	if err != nil {
-		why := DiagnoseBinary(newBin)
+		why := notRunReason(err, DiagnoseBinary(newBin))
 		_ = os.Remove(newBin)
 		return "", notRunnable{fmt.Errorf("файл не запускается: %s", why)}
 	}
@@ -575,6 +583,29 @@ func (in *Installer) installOne(ctx context.Context, c *http.Client, core string
 	// запоминаем тег релиза: по нему панель узнаёт, есть ли новее (сам бинарник может печатать версию иначе, чем тег)
 	_ = os.WriteFile(final+".ver", []byte(tg.Version+"\n"), 0o644)
 	return ver, nil
+}
+
+// noSpaceText — почему не хватает места. У amnezia-box файл качается как есть, без распаковки.
+func noSpaceText(core, binDir string, free uint64, size int64) string {
+	const hint = "Подключите накопитель и задайте каталог в разделе «Компоненты» либо установите ядро из пакетов системы"
+	if core == model.CoreAmnezia {
+		return fmt.Sprintf("в %s свободно %d МБ — слишком мало: файл весит %d МБ и записывается как есть. %s",
+			binDir, free>>20, size>>20, hint)
+	}
+	return fmt.Sprintf("в %s свободно %d МБ — слишком мало (размер загрузки %d МБ, после распаковки ядро занимает около %d МБ). %s",
+		binDir, free>>20, size>>20, (size*5/2)>>20, hint)
+}
+
+// notRunReason объясняет, почему скачанный файл не запустился: «signal: killed» — это не «не та
+// архитектура», а убитый процесс (медленная распаковка UPX дольше 10 секунд или нехватка ОЗУ).
+func notRunReason(runErr error, diag string) string {
+	msg := runErr.Error()
+	if strings.Contains(msg, "killed") || strings.Contains(msg, "deadline") {
+		return msg + " — процесс убит: сжатая UPX-сборка при запуске целиком распаковывается в оперативную память " +
+			"(≈ размер несжатого файла), и системе не хватило ОЗУ либо процессор не успел за 10 секунд. " +
+			"Остановите ядро и повторите, либо возьмите сборку «-plain» и положите её на накопитель"
+	}
+	return msg + ". " + diag
 }
 
 // InstalledTag — тег релиза, установленного панелью («» — неизвестно: ядро поставлено не ею).
