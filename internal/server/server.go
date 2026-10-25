@@ -798,6 +798,26 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{"lines": s.Sup.Logs.Tail(n)})
 }
 
+// sseBatchMax — сколько строк журнала уходит в браузер за один сброс; остальное при шквале отбрасывается
+// (в буфере панели строки остаются, на странице видна пометка о пропуске).
+const sseBatchMax = 2000
+
+// sseLogEvent собирает одно SSE-событие из нескольких строк журнала (каждая — своя строка data:;
+// браузер склеивает их через «\n», страница разбирает обратно). dropped > 0 добавляет пометку о пропуске.
+func sseLogEvent(lines []string, dropped int) string {
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString("data: ")
+		b.WriteString(strings.NewReplacer("\r", " ", "\n", " ").Replace(l))
+		b.WriteByte('\n')
+	}
+	if dropped > 0 {
+		fmt.Fprintf(&b, "data: [panel] поток слишком быстрый, пропущено строк: %d (журнал ядра включён на уровне debug?)\n", dropped)
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
 func (s *Server) logStream(w http.ResponseWriter, r *http.Request) {
 	fl, okf := w.(http.Flusher)
 	if !okf {
@@ -811,18 +831,32 @@ func (s *Server) logStream(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	fmt.Fprint(w, ": ok\n\n")
 	fl.Flush()
-	tick := time.NewTicker(20 * time.Second)
+	// строки копятся и уходят пачкой раз в 250 мс: при уровне debug ядро пишет сотни строк в секунду,
+	// а отдельный Flush на каждую строку забивает процессор роутера и канал до браузера
+	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
+	var batch []string
+	dropped, idle := 0, 0
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case line := <-ch:
-			fmt.Fprintf(w, "data: %s\n\n", strings.ReplaceAll(line, "\n", " "))
-			fl.Flush()
+			if len(batch) < sseBatchMax {
+				batch = append(batch, line)
+			} else {
+				dropped++
+			}
 		case <-tick.C:
-			fmt.Fprint(w, ": ping\n\n")
-			fl.Flush()
+			if len(batch) > 0 {
+				fmt.Fprint(w, sseLogEvent(batch, dropped))
+				fl.Flush()
+				batch, dropped, idle = batch[:0], 0, 0
+			} else if idle++; idle >= 80 { // ~20 с без строк
+				fmt.Fprint(w, ": ping\n\n")
+				fl.Flush()
+				idle = 0
+			}
 		}
 	}
 }

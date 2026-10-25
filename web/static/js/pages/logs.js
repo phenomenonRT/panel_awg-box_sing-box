@@ -11,7 +11,7 @@ function level(line) {
 }
 export default async function (root) {
   const f = { level: 'debug', text: '', pause: false, auto: true };
-  let all = [], es = null, alive = true;
+  let all = [], es = null, alive = true, ft = 0;
   const view = h('div', { class: 'log', tabindex: '0', role: 'log', 'aria-label': 'Журнал' });
   const state = h('span', { class: 'small mute' });
   const pass = (l) => LV[l.lv] >= LV[f.level] && (!f.text || l.t.toLowerCase().includes(f.text.toLowerCase()));
@@ -19,26 +19,42 @@ export default async function (root) {
   function redraw() {
     clear(view);
     const frag = document.createDocumentFragment();
-    for (const l of all) if (pass(l)) frag.append(mk(l));
+    const shown = all.filter(pass).slice(-2000);
+    for (const l of shown) frag.append(mk(l));
     view.append(frag);
     if (!view.firstChild) view.append(h('div', { class: 'mute' }, 'Нет записей'));
     if (f.auto) view.scrollTop = view.scrollHeight;
   }
-  function push(t) {
-    t = t.replace(ANSI, '');
-    const l = { t, lv: level(t) };
-    all.push(l);
+  // Строки приходят пачками (сервер сбрасывает их раз в 250 мс), а на экран попадают не чаще раза в 200 мс:
+  // при уровне debug ядро пишет сотни строк в секунду, и вставка + пересчёт раскладки на каждую строку вешает вкладку.
+  let queue = [], timer = 0;
+  function push(data) {
+    for (const part of String(data).split('\n')) if (part) queue.push(part.replace(ANSI, ''));
+    if (!timer) timer = setTimeout(flush, 200);
+  }
+  function flush() {
+    timer = 0;
+    if (!queue.length) return;
+    const batch = queue; queue = [];
+    const frag = document.createDocumentFragment();
+    let added = 0;
+    for (const t of batch) {
+      const l = { t, lv: level(t) };
+      all.push(l);
+      if (!f.pause && pass(l)) { frag.append(mk(l)); added++; }
+    }
     if (all.length > 3000) all = all.slice(-2000);
-    if (f.pause || !pass(l)) return;
+    if (!added) return;
     if (view.firstChild && !view.firstChild.className) clear(view);
-    view.append(mk(l));
-    while (view.childElementCount > 2000) view.firstChild.remove();
-    if (f.auto) view.scrollTop = view.scrollHeight;
+    view.append(frag);
+    let extra = view.childElementCount - 2000; // childElementCount считаем один раз: на больших списках он дорогой
+    while (extra-- > 0 && view.firstChild) view.firstChild.remove();
+    if (f.auto) view.scrollTop = view.scrollHeight; // раз за пачку, а не за строку
   }
   apd(root, pageHead('Логи', 'Журнал ядра в реальном времени'),
     h('div', { class: 'row', style: 'margin-bottom:10px' },
       h('div', { style: 'width:150px' }, sel(f, 'level', [['debug', 'все уровни'], ['info', 'info и выше'], ['warn', 'warn и выше'], ['error', 'только error']], { onchange: redraw })),
-      h('input', { type: 'text', style: 'flex:1;min-width:140px;max-width:300px', placeholder: 'Фильтр по тексту', 'aria-label': 'Фильтр по тексту', oninput: (e) => { f.text = e.target.value; redraw(); } }),
+      h('input', { type: 'text', style: 'flex:1;min-width:140px;max-width:300px', placeholder: 'Фильтр по тексту', 'aria-label': 'Фильтр по тексту', oninput: (e) => { f.text = e.target.value; clearTimeout(ft); ft = setTimeout(redraw, 200); } }),
       h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: true, onchange: (e) => { f.auto = e.target.checked; if (f.auto) view.scrollTop = view.scrollHeight; } }), 'автопрокрутка'),
       h('button', { class: 'btn', onclick: (e) => { f.pause = !f.pause; e.target.textContent = f.pause ? 'Продолжить' : 'Пауза'; if (!f.pause) redraw(); } }, 'Пауза'),
       h('button', { class: 'btn', title: 'Копирует строки, которые сейчас видны с учётом фильтров', onclick: () => {
@@ -60,5 +76,5 @@ export default async function (root) {
     es.onerror = () => { state.textContent = '○ нет соединения, повтор…'; state.style.color = 'var(--warn)'; };
   }
   connect();
-  return () => { alive = false; if (es) es.close(); };
+  return () => { alive = false; clearTimeout(timer); clearTimeout(ft); if (es) es.close(); };
 }
