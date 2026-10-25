@@ -124,3 +124,25 @@ func TestNormalizeClampsTimeouts(t *testing.T) {
 		}
 	}
 }
+
+func TestConntrackMaxValidation(t *testing.T) {
+	check := func(v int) (errs, warns int) {
+		s := Default()
+		s.General.ConntrackMax = v
+		for _, is := range s.Validate() {
+			if strings.Contains(is.Message, "conntrack") {
+				if is.Level == "error" {
+					errs++
+				} else {
+					warns++
+				}
+			}
+		}
+		return
+	}
+	for _, c := range []struct{ v, e, w int }{{0, 0, 0}, {32768, 0, 0}, {100, 1, 0}, {999999, 1, 0}, {200000, 0, 1}} {
+		if e, w := check(c.v); e != c.e || w != c.w {
+			t.Errorf("conntrack_max=%d: ошибок %d (ждали %d), предупреждений %d (ждали %d)", c.v, e, c.e, w, c.w)
+		}
+	}
+}

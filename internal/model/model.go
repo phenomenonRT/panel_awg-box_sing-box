@@ -65,6 +65,9 @@ type General struct {
 	// MemLimitMB — «сколько памяти можно ядру», МБ: ядро запускается с GOMEMLIMIT, и сборщик мусора
 	// старается держать потребление ниже предела. 0 — без ограничения. В конфиг sing-box не попадает.
 	MemLimitMB int `json:"mem_limit_mb,omitempty"`
+	// ConntrackMax — предел таблицы соединений роутера (nf_conntrack_max). Панель выставляет его при запуске
+	// ядра. 0 — не трогать. В конфиг sing-box не попадает.
+	ConntrackMax int `json:"conntrack_max,omitempty"`
 }
 
 type Inbounds struct {
@@ -252,6 +255,13 @@ const (
 	GroupIdleTimeoutMinSec     = 60
 	GroupIdleTimeoutMaxSec     = 604800
 	GroupIdleTimeoutDefaultSec = 1800
+)
+
+// Допустимый предел таблицы соединений (nf_conntrack_max). 0 — не менять. Одна запись занимает порядка 300 байт ОЗУ.
+const (
+	ConntrackMinMax  = 4096
+	ConntrackMaxMax  = 262144
+	ConntrackWarnMax = 131072
 )
 
 // Допустимое ограничение памяти ядра (GOMEMLIMIT), МБ. 0 — не ограничивать.
@@ -667,6 +677,15 @@ func (s *Settings) Validate() []Issue {
 	}
 	if s.General.MemLimitMB != 0 && (s.General.MemLimitMB < MemLimitMinMB || s.General.MemLimitMB > MemLimitMaxMB) {
 		add("error", "ограничение памяти ядра должно быть от %d до %d МБ (0 — без ограничения)", MemLimitMinMB, MemLimitMaxMB)
+	}
+
+	if s.General.ConntrackMax != 0 {
+		switch {
+		case s.General.ConntrackMax < ConntrackMinMax || s.General.ConntrackMax > ConntrackMaxMax:
+			add("error", "предел таблицы соединений (conntrack) должен быть от %d до %d (0 — не менять)", ConntrackMinMax, ConntrackMaxMax)
+		case s.General.ConntrackMax > ConntrackWarnMax:
+			add("warn", "предел conntrack %d очень велик: запись занимает порядка 300 байт, при заполнении таблицы роутеру с малой ОЗУ может не хватить памяти", s.General.ConntrackMax)
+		}
 	}
 
 	if s.Firewall.Mode == "off" && !s.Tun.Enabled {

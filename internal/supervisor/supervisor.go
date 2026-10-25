@@ -334,6 +334,14 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 		return errors.New(s.lastErr)
 	}
 
+	if msg, err := applyConntrackMax(set.General.ConntrackMax); err != nil {
+		// не критично: ядро работает и с прежним пределом, поэтому только предупреждаем
+		s.Logs.Add("[panel] предел conntrack не применён: " + err.Error())
+		res.Warnings = append(res.Warnings, "предел conntrack не применён: "+err.Error())
+	} else if msg != "" {
+		s.Logs.Add("[panel] " + msg)
+	}
+
 	cmd := exec.Command(bin, "run", "-c", cfgPath, "-D", dir)
 	// sing-box 1.14+ (включая amnezia-box на базе 1.15): разрешаем неявный HTTP-клиент для совместимости
 	cmd.Env = append(os.Environ(), "ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true")
@@ -375,6 +383,7 @@ func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error 
 	tl := newTailer(logFile, s.Logs, 0)
 	go tl.run()
 	done := s.done
+	go s.watchConntrack(done)
 	go s.refreshRuleSets(set, dir, ramDir, done)
 	if len(ruleSetWarnings) > 0 {
 		go s.retryRuleSets(set, dir, ramDir, done)
