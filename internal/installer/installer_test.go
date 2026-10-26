@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -292,5 +293,57 @@ func TestFetchExtractFallsBackToNextURL(t *testing.T) {
 	err := in.fetchExtract(context.Background(), good.Client(), target{URLs: []string{bad.URL + "/x", "http://127.0.0.1:1/x"}}, model.CoreAmnezia, dst)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
 		t.Fatalf("ожидалась ошибка с HTTP 404, получили %v", err)
+	}
+}
+
+func TestNoSpaceText(t *testing.T) {
+	am := noSpaceText(model.CoreAmnezia, "/etc/corepanel/bin", 26<<20, 44<<20)
+	if strings.Contains(am, "распаковки") || !strings.Contains(am, "записывается как есть") {
+		t.Errorf("для amnezia-box распаковки нет: %s", am)
+	}
+	sb := noSpaceText(model.CoreSingbox, "/etc/corepanel/bin", 26<<20, 44<<20)
+	if !strings.Contains(sb, "после распаковки") || !strings.Contains(sb, "110 МБ") {
+		t.Errorf("для sing-box ждали оценку после распаковки: %s", sb)
+	}
+}
+
+func TestNotRunReason(t *testing.T) {
+	r := notRunReason(errors.New("amnezia-box.new не запускается: signal: killed ()"), "диагностика")
+	if !strings.Contains(r, "signal: killed") || !strings.Contains(r, "оперативную память") {
+		t.Errorf("убитый процесс надо объяснять: %s", r)
+	}
+	if strings.Contains(r, "диагностика") {
+		t.Errorf("при убитом процессе диагностика ELF не нужна: %s", r)
+	}
+	r = notRunReason(errors.New("exec format error"), "сборка не подходит")
+	if !strings.Contains(r, "exec format error") || !strings.Contains(r, "сборка не подходит") {
+		t.Errorf("обычная причина должна сохраняться: %s", r)
+	}
+}
+
+// Основная сборка не запустилась, запасная не помещается: в ошибке видны обе причины.
+func TestInstallTargetsKeepsFirstFailure(t *testing.T) {
+	dir := t.TempDir()
+	// настоящий ELF, который всегда завершается с ошибкой: Version вернёт ошибку запуска
+	elfBin, err := os.ReadFile("/bin/false")
+	if err != nil {
+		t.Skip("нет /bin/false:", err)
+	}
+	script := elfBin
+	srv := serveArchive(t, "a", script)
+	defer srv.Close()
+	in := New(platform.Info{Arch: "arm64", BinDir: dir})
+	tgs := []target{
+		{URLs: []string{srv.URL}, Name: "amnezia-box-linux-arm64", Size: int64(len(script))},
+		{URLs: []string{srv.URL}, Name: "amnezia-box-linux-arm64-plain", Size: 1 << 50}, // заведомо не поместится
+	}
+	_, err = in.installTargets(context.Background(), srv.Client(), model.CoreAmnezia, tgs, dir, model.Download{})
+	if err == nil {
+		t.Fatal("ожидалась ошибка")
+	}
+	for _, want := range []string{"слишком мало", "Перед этим", "amnezia-box-linux-arm64:", "не запускается"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("в ошибке нет %q: %v", want, err)
+		}
 	}
 }
