@@ -135,3 +135,46 @@ func TestStaleDNSListen(t *testing.T) {
 		t.Error("при пустом списке адресов слушатель считать устаревшим нельзя")
 	}
 }
+
+// Пока s.mu занят долгим запуском ядра, Status не должен виснуть: отдаётся последнее состояние.
+func TestStatusDoesNotBlockWhileLocked(t *testing.T) {
+	sup, set := fakeCore(t, `trap 'exit 0' TERM; while true; do sleep 0.1; done`)
+	if err := sup.Start(set); err != nil {
+		t.Fatal(err)
+	}
+	if st := sup.Status(); st.State != "running" || st.PID == 0 {
+		t.Fatalf("статус: %+v", st)
+	}
+
+	sup.mu.Lock() // имитируем startLocked, который держит блокировку
+	sup.transition.Add(1)
+	done := make(chan Status, 1)
+	go func() { done <- sup.Status() }()
+	select {
+	case st := <-done:
+		if st.State != "running" || st.PID == 0 || st.Notice == "" {
+			t.Errorf("при занятой блокировке ждали последний статус с пометкой: %+v", st)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Status завис на занятой блокировке")
+	}
+	sup.transition.Add(-1)
+	sup.mu.Unlock()
+
+	if st := sup.Status(); st.Notice != "" {
+		t.Errorf("после освобождения пометка должна исчезнуть: %+v", st)
+	}
+}
+
+// Пока ядро запускается и прежнего состояния «работает» нет, UI должен видеть «starting».
+func TestStatusStartingWhenBusy(t *testing.T) {
+	sup, _ := fakeCore(t, `exit 0`)
+	sup.mu.Lock()
+	sup.transition.Add(1)
+	st := sup.Status()
+	sup.transition.Add(-1)
+	sup.mu.Unlock()
+	if st.State != "starting" || st.Notice == "" {
+		t.Errorf("ждали starting с пометкой: %+v", st)
+	}
+}

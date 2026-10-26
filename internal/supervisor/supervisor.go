@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -113,6 +114,10 @@ type Supervisor struct {
 
 	mu                 sync.Mutex
 	rulesetMu          sync.Mutex
+	transition         atomic.Int32 // >0, пока выполняется startLocked: s.mu при этом занят надолго
+	statusMu           sync.Mutex   // защищает последний снимок статуса (отдаётся, если s.mu занят)
+	lastStatus         Status
+	lastStatusAt       time.Time
 	cmd                *exec.Cmd
 	done               chan struct{}
 	core               string
@@ -305,6 +310,8 @@ func (s *Supervisor) running() bool {
 }
 
 func (s *Supervisor) startLocked(set *model.Settings, userInitiated bool) error {
+	s.transition.Add(1)
+	defer s.transition.Add(-1)
 	if s.running() {
 		return errors.New("ядро уже запущено")
 	}
@@ -912,10 +919,59 @@ func (s *Supervisor) Restart(set *model.Settings) error {
 	return s.Start(set)
 }
 
-// Status возвращает текущее состояние.
+// Status возвращает текущее состояние. Не ждёт долго: запуск ядра держит s.mu десятки секунд
+// (проверка конфига до 30 с, наборы правил, брандмауэр), а панель опрашивает статус постоянно —
+// запрос зависал бы вместе со страницей. Если s.mu занят, отдаётся последнее известное состояние.
 func (s *Supervisor) Status() Status {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if !s.lockBriefly() {
+		return s.busyStatus()
+	}
+	st := s.statusLocked()
+	s.mu.Unlock()
+	s.statusMu.Lock()
+	s.lastStatus, s.lastStatusAt = st, time.Now()
+	s.statusMu.Unlock()
+	return st
+}
+
+// lockBriefly пытается взять s.mu не дольше ~250 мс: обычные короткие занятия (наблюдатели,
+// проверки) проходят незаметно, а долгий запуск ядра — нет.
+func (s *Supervisor) lockBriefly() bool {
+	for i := 0; i < 10; i++ {
+		if s.mu.TryLock() {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return false
+}
+
+// busyStatus — ответ, пока s.mu занят запуском или остановкой ядра.
+func (s *Supervisor) busyStatus() Status {
+	s.statusMu.Lock()
+	st, at := s.lastStatus, s.lastStatusAt
+	s.statusMu.Unlock()
+	starting := s.transition.Load() > 0
+	switch {
+	case at.IsZero():
+		st = Status{State: "stopped"}
+	case st.State == "running":
+		st.UptimeSec += int64(time.Since(at).Seconds())
+		st.MemMB = procRSSMB(st.PID)
+	}
+	if starting && st.State != "running" {
+		st.State, st.Error = "starting", ""
+	}
+	if starting {
+		st.Notice = "Идёт запуск ядра: проверка конфигурации, наборы правил, правила брандмауэра. Состояние обновится, когда он завершится."
+	} else {
+		st.Notice = "Ядро сейчас запускается, останавливается или перезапускается — показано последнее известное состояние."
+	}
+	return st
+}
+
+// statusLocked собирает статус. Вызывать под s.mu.
+func (s *Supervisor) statusLocked() Status {
 	st := Status{State: "stopped", Core: s.core, Error: s.lastErr, FirewallError: s.fwErr,
 		Restarts: s.restarts, Version: s.version, Warnings: s.warnings}
 	if s.recoverNote != "" {
